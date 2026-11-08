@@ -59,7 +59,7 @@
 
     <div class="recherche">
       <div class="champ">
-        <label for="recherche">Rechercher par nom ou ingrédient</label>
+        <label for="recherche">Rechercher (nom, ingrédient, étiquette, instructions)</label>
         <input type="search" id="recherche" placeholder="Ex. : tarte, poulet, farine…" autocomplete="off">
       </div>
       <div class="champ">
@@ -71,7 +71,16 @@
           <option value="120">2 h max</option>
         </select>
       </div>
+      <div class="champ">
+        <label for="tri">Trier par</label>
+        <select id="tri">
+          <option value="modifie">Modifiées récemment</option>
+          <option value="nom">Nom (A → Z)</option>
+          <option value="temps">Temps total croissant</option>
+        </select>
+      </div>
     </div>
+    <div id="filtres-etiquettes" class="puces-filtre" role="group" aria-label="Filtrer par étiquette"></div>
 
     <div id="liste-recettes" class="cartes"></div>
     <p id="aucune-recette" class="discret" hidden>Aucune recette ne correspond. <a href="#/nouvelle">Créez votre première recette</a>.</p>
@@ -176,6 +185,9 @@
 
 <!-- Messages transitoires -->
 <div id="toast" role="status" aria-live="polite"></div>
+
+<!-- Annonces aux lecteurs d'écran (changements de vue) -->
+<div id="annonce" class="visually-hidden" aria-live="polite"></div>
 
 <script src="js/app.js"></script>
 </body>

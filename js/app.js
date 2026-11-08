@@ -45,6 +45,20 @@ function formatNombre(q) {
   return new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 }).format(q);
 }
 
+/* Températures : stockées en °C, affichées selon le réglage (°C ou °F). */
+function cVersF(c) { return Math.round(c * 9 / 5 + 32); }
+function fVersC(f) { return Math.round((f - 32) * 5 / 9); }
+function uniteTemp() { return donnees.reglages.uniteTemp === 'F' ? 'F' : 'C'; }
+function formaterTemperature(tC) {
+  if (tC === null || tC === undefined) return '';
+  if (uniteTemp() === 'F') return cVersF(tC) + ' °F';
+  return tC + ' °C';
+}
+function temperatureSecondaire(tC) {
+  if (tC === null || tC === undefined) return '';
+  return uniteTemp() === 'F' ? ' (' + tC + ' °C)' : ' (' + cVersF(tC) + ' °F)';
+}
+
 /* ------------------------------------------------------------
    2. Quantités : unités, arrondi intelligent, fractions
    ------------------------------------------------------------ */
@@ -107,6 +121,8 @@ function formaterQuantite(q, unite) {
 /* Quantité d'un ingrédient recalculée pour `parts` parts
    (recette de base : `partsBase` parts), avec arrondi intelligent. */
 function quantiteMiseAJour(ingredient, parts, partsBase) {
+  /* Ingrédient à « quantité fixe » (sel, poivre, liant…) : jamais mis à l'échelle. */
+  if (ingredient.fixe) return normaliserAffichage(ingredient.quantite, ingredient.unite);
   const facteur = parts / partsBase;
   const q = arrondirSelonUnite(ingredient.quantite * facteur, ingredient.unite);
   return normaliserAffichage(q, ingredient.unite);
@@ -122,8 +138,8 @@ const VERSION_DONNEES = 1;
 /* Toutes les données de l'application. */
 let donnees = {
   recettes: [],   // voir structure d'une recette ci-dessous
-  courses: [],    // { id, nom, quantite, unite, coche }
-  reglages: { theme: 'nuit', luminosite: 100 }
+  courses: [],    // { id, nom, quantite, unite, coche, recurrente }
+  reglages: { theme: 'nuit', luminosite: 100, tri: 'modifie', uniteTemp: 'C' }
 };
 
 /* Structure d'une recette :
@@ -153,7 +169,9 @@ function normaliserRecette(r) {
     modeFour: r.modeFour === 'tournante' ? 'tournante' : 'traditionnel',
     ingredients: (Array.isArray(r.ingredients) ? r.ingredients : [])
       .filter((i) => i && i.nom && Number(i.quantite) > 0)
-      .map((i) => ({ id: i.id || uid(), nom: String(i.nom), quantite: Number(i.quantite), unite: UNITES.includes(i.unite) ? i.unite : 'pièce' })),
+      .map((i) => ({ id: i.id || uid(), nom: String(i.nom), quantite: Number(i.quantite), unite: UNITES.includes(i.unite) ? i.unite : 'pièce', fixe: !!i.fixe })),
+    etiquettes: [...new Set((Array.isArray(r.etiquettes) ? r.etiquettes : []).map((e) => String(e).trim()).filter(Boolean))].slice(0, 12),
+    photo: !!r.photo,
     instructions: String(r.instructions || ''),
     creeLe: r.creeLe || new Date().toISOString(),
     modifieLe: r.modifieLe || new Date().toISOString()
@@ -175,11 +193,11 @@ function chargerDonnees() {
       courses: (lu.courses || [])
         .filter((c) => c && c.nom)
         .map((c) => ({ id: c.id || uid(), nom: String(c.nom), quantite: Number(c.quantite) || 0, unite: uniteBase(UNITES.includes(c.unite) ? c.unite : 'pièce'), coche: !!c.coche })),
-      reglages: Object.assign({ theme: 'nuit', luminosite: 100 }, lu.reglages || {})
+      reglages: Object.assign({ theme: 'nuit', luminosite: 100, tri: 'modifie', uniteTemp: 'C' }, lu.reglages || {})
     };
   } catch (e) {
     console.error('Omni-Cooking : données illisibles, réinitialisation', e);
-    donnees = { recettes: [recetteDemo()], courses: [], reglages: { theme: 'nuit', luminosite: 100 } };
+    donnees = { recettes: [recetteDemo()], courses: [], reglages: { theme: 'nuit', luminosite: 100, tri: 'modifie', uniteTemp: 'C' } };
   }
 }
 
@@ -194,12 +212,14 @@ function recetteDemo() {
     tempsCuisson: 20,
     temperature: null, // cuisson à la poêle, pas de four
     modeFour: 'traditionnel',
+    etiquettes: ['petit-déjeuner', 'rapide'],
+    photo: false,
     ingredients: [
       { id: uid(), nom: 'farine', quantite: 250, unite: 'g' },
       { id: uid(), nom: 'lait', quantite: 500, unite: 'ml' },
       { id: uid(), nom: 'œufs', quantite: 3, unite: 'pièce' },
       { id: uid(), nom: 'sucre', quantite: 2, unite: 'c.à.s' },
-      { id: uid(), nom: 'sel', quantite: 1, unite: 'pincée' }
+      { id: uid(), nom: 'sel', quantite: 1, unite: 'pincée', fixe: true }
     ],
     instructions: 'Mélanger la farine, le sucre et le sel dans un saladier.\nCreuser un puits, casser les œufs au centre et mélanger.\nVerser le lait progressivement en fouettant pour éviter les grumeaux.\nLaisser reposer 30 minutes si possible.\nCuire les crêpes à feu moyen, 1 à 2 minutes par face.',
     creeLe: new Date().toISOString(),
@@ -213,17 +233,35 @@ function recetteDemo() {
 
 let rechercheTexte = '';
 let filtreTemps = 'tous';
+let etiquetteActive = null; // filtre par étiquette (une seule active à la fois)
 
 function recettesFiltrees() {
   const recherche = normaliserTexte(rechercheTexte);
   const max = filtreTemps === 'tous' ? Infinity : parseInt(filtreTemps, 10);
-  return donnees.recettes.filter((r) => {
+  const tri = donnees.reglages.tri || 'modifie';
+  const liste = donnees.recettes.filter((r) => {
     const total = r.tempsPreparation + r.tempsCuisson;
     if (total > max) return false;
+    if (etiquetteActive && !r.etiquettes.some((e) => normaliserTexte(e) === normaliserTexte(etiquetteActive))) return false;
     if (!recherche) return true;
     if (normaliserTexte(r.nom).includes(recherche)) return true;
+    if (normaliserTexte(r.instructions).includes(recherche)) return true;
+    if (r.etiquettes.some((e) => normaliserTexte(e).includes(recherche))) return true;
     return r.ingredients.some((i) => normaliserTexte(i.nom).includes(recherche));
   });
+  const cmp = {
+    nom: (a, b) => a.nom.localeCompare(b.nom, 'fr'),
+    temps: (a, b) => (a.tempsPreparation + a.tempsCuisson) - (b.tempsPreparation + b.tempsCuisson),
+    modifie: (a, b) => String(b.modifieLe).localeCompare(String(a.modifieLe))
+  }[tri] || ((a, b) => String(b.modifieLe).localeCompare(String(a.modifieLe)));
+  return liste.sort(cmp);
+}
+
+/* Toutes les étiquettes utilisées, triées pour les puces de filtre. */
+function toutesEtiquettes() {
+  const set = new Set();
+  for (const r of donnees.recettes) for (const e of r.etiquettes) set.add(e);
+  return [...set].sort((a, b) => a.localeCompare(b, 'fr'));
 }
 
 /* ------------------------------------------------------------
@@ -310,25 +348,68 @@ function rendreAccueil() {
   liste.textContent = '';
   const recettes = recettesFiltrees();
   document.getElementById('aucune-recette').hidden = recettes.length > 0;
+
+  /* Puces de filtre par étiquette. */
+  const barreEtiquettes = document.getElementById('filtres-etiquettes');
+  barreEtiquettes.textContent = '';
+  const etiquettes = toutesEtiquettes();
+  barreEtiquettes.hidden = etiquettes.length === 0;
+  if (etiquettes.length > 0) {
+    barreEtiquettes.append(el('button', {
+      class: 'puce-filtre' + (etiquetteActive === null ? ' active' : ''), type: 'button',
+      'aria-pressed': etiquetteActive === null ? 'true' : 'false',
+      onclick: () => { etiquetteActive = null; rendreAccueil(); }
+    }, 'Toutes'));
+    for (const e of etiquettes) {
+      const active = normaliserTexte(e) === normaliserTexte(etiquetteActive || '');
+      barreEtiquettes.append(el('button', {
+        class: 'puce-filtre' + (active ? ' active' : ''), type: 'button',
+        'aria-pressed': active ? 'true' : 'false',
+        onclick: () => { etiquetteActive = active ? null : e; rendreAccueil(); }
+      }, e));
+    }
+  }
+
   for (const r of recettes) {
     const puces = el('ul', { class: 'puces' },
       puceTexte('⏱', tempsTotal(r) + ' min'),
       puceTexte('👥', r.partsBase + (r.partsBase > 1 ? ' parts' : ' part')),
       puceTexte('🧺', r.ingredients.length + (r.ingredients.length > 1 ? ' ingrédients' : ' ingrédient'))
     );
-    if (r.temperature) puces.append(puceTexte('🌡', r.temperature + ' °C'));
+    if (r.temperature) puces.append(puceTexte('🌡', formaterTemperature(r.temperature) + temperatureSecondaire(r.temperature)));
+    if (r.etiquettes.length > 0) puces.append(el('li', { class: 'puce' }, '🏷 ', el('b', { text: r.etiquettes.join(', ') })));
     liste.append(el('article', { class: 'carte-recette' },
       el('h2', {}, el('a', { href: '#/recette/' + r.id, text: r.nom })),
       puces,
       el('div', { class: 'actions' },
         el('a', { class: 'bouton-secondaire', href: '#/recette/' + r.id }, 'Ouvrir'),
         el('a', { class: 'bouton-secondaire', href: '#/recette/' + r.id + '/modifier' }, 'Modifier'),
+        el('button', { class: 'bouton-secondaire', type: 'button', onclick: () => dupliquerRecette(r.id) }, 'Dupliquer'),
         el('button', { class: 'bouton-danger', type: 'button', onclick: () => supprimerRecette(r.id) }, 'Supprimer')
       )
     ));
   }
   document.getElementById('recherche').value = rechercheTexte;
   document.getElementById('filtre-temps').value = filtreTemps;
+  document.getElementById('tri').value = donnees.reglages.tri || 'modifie';
+}
+
+/* Duplique une recette (nouveaux identifiants, nom suffixé « (copie) »). */
+function dupliquerRecette(id) {
+  const r = donnees.recettes.find((x) => x.id === id);
+  if (!r) return;
+  const copie = normaliserRecette(JSON.parse(JSON.stringify({
+    ...r,
+    id: uid(),
+    nom: r.nom + ' (copie)',
+    creeLe: new Date().toISOString(),
+    modifieLe: new Date().toISOString()
+  })));
+  copie.ingredients = copie.ingredients.map((i) => ({ ...i, id: uid() }));
+  donnees.recettes.push(copie);
+  sauvegarder();
+  toast('Recette dupliquée : « ' + copie.nom + ' »');
+  location.hash = '#/recette/' + copie.id;
 }
 
 function supprimerRecette(id) {
@@ -355,7 +436,8 @@ function rendreFiche(id) {
   puces.append(puceTexte('👥', r.partsActuelles + ' / ' + r.partsBase + (r.partsBase > 1 ? ' parts' : ' part')));
   if (r.tempsPreparation) puces.append(puceTexte('⏱', 'prépa ' + r.tempsPreparation + ' min'));
   if (r.tempsCuisson) puces.append(puceTexte('🔥', 'cuisson ' + r.tempsCuisson + ' min'));
-  if (r.temperature) puces.append(puceTexte('🌡', r.temperature + ' °C — ' + (r.modeFour === 'tournante' ? 'chaleur tournante' : 'four traditionnel')));
+  if (r.temperature) puces.append(puceTexte('🌡', formaterTemperature(r.temperature) + temperatureSecondaire(r.temperature) + ' — ' + (r.modeFour === 'tournante' ? 'chaleur tournante' : 'four traditionnel')));
+  if (r.etiquettes.length > 0) puces.append(el('li', { class: 'puce' }, '🏷 ', el('b', { text: r.etiquettes.join(', ') })));
 
   /* Sélecteur de parts : les quantités se recalculent automatiquement. */
   const champParts = el('input', {
@@ -374,7 +456,7 @@ function rendreFiche(id) {
   for (const ing of r.ingredients) {
     const q = quantiteMiseAJour(ing, r.partsActuelles, r.partsBase);
     listeIng.append(el('li', {},
-      el('span', { class: 'nom', text: ing.nom }),
+      el('span', { class: 'nom' }, ing.nom, ing.fixe ? el('span', { class: 'badge-fixe', text: 'qte fixe' }) : null),
       el('span', { class: 'qte', text: formaterQuantite(q.q, q.unite) }),
       el('button', {
         class: 'bouton-secondaire ajouter-courses', type: 'button',
@@ -423,6 +505,7 @@ function rendreFiche(id) {
     ) : null,
     el('div', { class: 'actions-ligne' },
       el('a', { class: 'bouton', href: '#/recette/' + r.id + '/modifier' }, 'Modifier'),
+      el('button', { class: 'bouton-secondaire', type: 'button', onclick: () => dupliquerRecette(r.id) }, 'Dupliquer'),
       el('button', { class: 'bouton', type: 'button', onclick: () => ouvrirModeCuisson(r.id) }, '🔥 Mode cuisson'),
       el('button', { class: 'bouton-danger', type: 'button', onclick: () => supprimerRecette(r.id) }, 'Supprimer')
     )
@@ -439,10 +522,16 @@ function rendreFormulaire(id) {
 
   /* Champs principaux. */
   const champNom = el('input', { type: 'text', id: 'f-nom', required: 'true', maxlength: '120', placeholder: 'Ex. : Tarte aux pommes', value: existant ? existant.nom : '' });
+  const champEtiquettes = el('input', { type: 'text', id: 'f-etiquettes', maxlength: '200', placeholder: 'Ex. : dessert, rapide, végétarien', value: existant ? existant.etiquettes.join(', ') : '' });
   const champParts = el('input', { type: 'number', id: 'f-parts', min: '1', max: '999', step: '1', required: 'true', value: existant ? existant.partsBase : 4 });
   const champPrepa = el('input', { type: 'number', id: 'f-prepa', min: '0', max: '9999', step: '1', value: existant ? existant.tempsPreparation : 0 });
   const champCuisson = el('input', { type: 'number', id: 'f-cuisson', min: '0', max: '9999', step: '1', value: existant ? existant.tempsCuisson : 0 });
-  const champTemp = el('input', { type: 'number', id: 'f-temp', min: '0', max: '300', step: '5', placeholder: 'ex. : 180', value: existant && existant.temperature !== null ? existant.temperature : '' });
+  const champTemp = el('input', {
+    type: 'number', id: 'f-temp',
+    min: uniteTemp() === 'F' ? '32' : '0', max: uniteTemp() === 'F' ? '600' : '300', step: uniteTemp() === 'F' ? '10' : '5',
+    placeholder: uniteTemp() === 'F' ? 'ex. : 350' : 'ex. : 180',
+    value: existant && existant.temperature !== null ? (uniteTemp() === 'F' ? cVersF(existant.temperature) : existant.temperature) : ''
+  });
   const champMode = el('select', { id: 'f-mode' },
     el('option', { value: 'traditionnel', selected: !existant || existant.modeFour !== 'tournante' ? 'true' : null }, 'Four traditionnel'),
     el('option', { value: 'tournante', selected: existant && existant.modeFour === 'tournante' ? 'true' : null }, 'Chaleur tournante')
@@ -457,12 +546,17 @@ function rendreFormulaire(id) {
     const champUnite = el('select', { class: 'unite', 'aria-label': 'Unité' },
       UNITES.map((u) => el('option', { value: u, selected: ing && ing.unite === u ? 'true' : null }, u))
     );
+    const caseFixe = el('input', {
+      type: 'checkbox', class: 'case-fixe',
+      'aria-label': 'Quantité fixe (non mise à l\'échelle avec les parts)', title: 'Quantité fixe : non mise à l\'échelle avec les parts',
+      checked: ing && ing.fixe ? 'true' : null
+    });
     const boutonSuppr = el('button', {
       class: 'bouton-icone', type: 'button', 'aria-label': 'Retirer cet ingrédient', title: 'Retirer',
       onclick: () => ligne.remove()
     }, '✕');
-    const ligne = el('div', { class: 'ligne-ingredient' }, champIngNom, champQte, champUnite, boutonSuppr);
-    ligne._champs = { nom: champIngNom, qte: champQte, unite: champUnite };
+    const ligne = el('div', { class: 'ligne-ingredient' }, champIngNom, champQte, champUnite, caseFixe, boutonSuppr);
+    ligne._champs = { nom: champIngNom, qte: champQte, unite: champUnite, fixe: caseFixe };
     return ligne;
   }
   (existant ? existant.ingredients : [{ nom: '', quantite: '', unite: 'g' }]).forEach((ing) => blocLignes.append(ligneIngredient(ing)));
@@ -475,13 +569,14 @@ function rendreFormulaire(id) {
     }
   },
     el('div', { class: 'champ' }, el('label', { for: 'f-nom', text: 'Nom de la recette *' }), champNom),
+    el('div', { class: 'champ' }, el('label', { for: 'f-etiquettes', text: 'Étiquettes (séparées par des virgules)' }), champEtiquettes),
     el('div', { class: 'ligne-champs' },
       el('div', { class: 'champ' }, el('label', { for: 'f-parts', text: 'Parts de base *' }), champParts),
       el('div', { class: 'champ' }, el('label', { for: 'f-prepa', text: 'Préparation (min)' }), champPrepa),
       el('div', { class: 'champ' }, el('label', { for: 'f-cuisson', text: 'Cuisson (min)' }), champCuisson)
     ),
     el('div', { class: 'ligne-champs' },
-      el('div', { class: 'champ' }, el('label', { for: 'f-temp', text: 'Température (°C)' }), champTemp),
+      el('div', { class: 'champ' }, el('label', { for: 'f-temp', id: 'label-temp', text: 'Température du four (' + (uniteTemp() === 'F' ? '°F' : '°C') + ')' }), champTemp),
       el('div', { class: 'champ' },
         el('label', { for: 'f-mode', text: 'Mode du four' }), champMode,
         el('p', { class: 'indice', text: 'En chaleur tournante, réglez en général 20 °C de moins qu\'en traditionnel.' })
@@ -516,8 +611,12 @@ function enregistrerRecette(form, existant) {
   const ingredients = [...form._blocLignes.children].map((ligne) => ({
     nom: ligne._champs.nom.value.trim(),
     quantite: parseFloat(String(ligne._champs.qte.value).replace(',', '.')) || 0,
-    unite: ligne._champs.unite.value
+    unite: ligne._champs.unite.value,
+    fixe: ligne._champs.fixe.checked
   })).filter((i) => i.nom && i.quantite > 0);
+  const etiquettes = [...new Set(
+    form.querySelector('#f-etiquettes').value.split(/[,;]/).map((s) => s.trim()).filter(Boolean)
+  )].slice(0, 12);
   const tempBrute = form.querySelector('#f-temp').value;
   const recette = {
     id: existant ? existant.id : uid(),
@@ -526,8 +625,11 @@ function enregistrerRecette(form, existant) {
     partsActuelles: existant ? existant.partsActuelles : partsBase,
     tempsPreparation: Math.max(0, parseInt(form.querySelector('#f-prepa').value, 10) || 0),
     tempsCuisson: Math.max(0, parseInt(form.querySelector('#f-cuisson').value, 10) || 0),
-    temperature: tempBrute === '' ? null : Math.round(Number(tempBrute)),
+    /* La température est toujours stockée en °C, même si le formulaire affiche des °F. */
+    temperature: tempBrute === '' ? null : (uniteTemp() === 'F' ? fVersC(Number(tempBrute)) : Math.round(Number(tempBrute))),
     modeFour: form.querySelector('#f-mode').value,
+    etiquettes,
+    photo: existant ? !!existant.photo : false,
     ingredients: ingredients.map((i) => ({ id: uid(), ...i })),
     instructions: form.querySelector('#f-instructions').value.trim(),
     creeLe: existant ? existant.creeLe : new Date().toISOString(),
@@ -914,6 +1016,11 @@ function init() {
   /* Recherche et filtres. */
   document.getElementById('recherche').addEventListener('input', (e) => { rechercheTexte = e.target.value; rendreAccueil(); });
   document.getElementById('filtre-temps').addEventListener('change', (e) => { filtreTemps = e.target.value; rendreAccueil(); });
+  document.getElementById('tri').addEventListener('change', (e) => {
+    donnees.reglages.tri = e.target.value;
+    sauvegarder();
+    rendreAccueil();
+  });
 
   /* Liste de courses. */
   document.getElementById('vider-cochees').addEventListener('click', () => {
