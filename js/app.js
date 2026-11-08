@@ -918,6 +918,16 @@ async function enregistrerRecette(form, existant) {
 }
 
 /* ---------- Liste de courses (vue) ---------- */
+/* Liste de courses groupée par rayon, dans l'ordre du magasin. */
+function coursesParRayon() {
+  const parRayon = new Map();
+  for (const g of coursesAgregees()) {
+    if (!parRayon.has(g.rayon)) parRayon.set(g.rayon, []);
+    parRayon.get(g.rayon).push(g);
+  }
+  return [...parRayon.entries()];
+}
+
 function rendreCourses() {
   const conteneur = document.getElementById('courses-contenu');
   conteneur.textContent = '';
@@ -926,13 +936,7 @@ function rendreCourses() {
     conteneur.append(el('p', { class: 'discret', text: 'La liste est vide. Ouvrez une recette et touchez « ＋ Courses » à côté d\'un ingrédient, « Tout ajouter », ou ajoutez un article ci-dessus.' }));
     return;
   }
-  /* Regroupement par rayon de magasin. */
-  const parRayon = new Map();
-  for (const g of groupes) {
-    if (!parRayon.has(g.rayon)) parRayon.set(g.rayon, []);
-    parRayon.get(g.rayon).push(g);
-  }
-  for (const [rayon, listeG] of parRayon) {
+  for (const [rayon, listeG] of coursesParRayon()) {
     const liste = el('ul', { class: 'liste-courses', 'aria-label': rayon });
     for (const g of listeG) {
       const q = normaliserAffichage(g.quantite, g.unite);
@@ -982,6 +986,53 @@ function rendreCourses() {
       liste
     ));
   }
+}
+
+/* ------------------------------------------------------------
+   6b. Export de la liste de courses en PDF (envoi à quelqu'un)
+   ------------------------------------------------------------ */
+
+/* Construit un PDF A4 de la liste de courses, puis le partage
+   (navigator.share de fichier) ou le télécharge. */
+async function exporterCoursesPDF() {
+  const groupes = coursesAgregees();
+  const lignes = [];
+  let restants = 0;
+  for (const [rayon, listeG] of coursesParRayon()) {
+    lignes.push({ texte: rayon, style: 'section' });
+    for (const g of listeG) {
+      const q = normaliserAffichage(g.quantite, g.unite);
+      const qte = g.quantite > 0 ? formaterQuantite(q.q, q.unite) + ' ' : '';
+      if (!g.coche) restants++;
+      lignes.push({ texte: (g.coche ? '[x] ' : '[ ] ') + qte + g.nom + (g.recurrente ? ' ★' : ''), style: 'texte' });
+    }
+  }
+  const blob = OmniPDF.creerBlob({
+    titre: 'Liste de courses',
+    sousTitre: 'Omni-Cooking — générée le ' + new Date().toLocaleDateString('fr-FR') +
+      ' — ' + groupes.length + ' article(s), dont ' + restants + ' restant(s) à acheter',
+    lignes
+  });
+  const date = new Date().toISOString().slice(0, 10);
+  const nomFichier = 'liste-de-courses-' + date + '.pdf';
+  const fichier = new File([blob], nomFichier, { type: 'application/pdf' });
+  /* Partage direct du fichier PDF si le navigateur le permet (envoi à un contact). */
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [fichier] })) {
+      await navigator.share({ files: [fichier], title: 'Liste de courses — Omni-Cooking', text: 'Ma liste de courses (PDF)' });
+      return;
+    }
+  } catch (e) {
+    if (e && e.name === 'AbortError') return; // partage annulé
+  }
+  /* Sinon : téléchargement classique. */
+  const url = URL.createObjectURL(blob);
+  const a = el('a', { href: url, download: nomFichier });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  toast('PDF téléchargé : ' + nomFichier);
 }
 
 /* ------------------------------------------------------------
@@ -1518,6 +1569,9 @@ async function init() {
     ajouterArticleManuel(champ.value);
     champ.value = '';
     rendreCourses();
+  });
+  document.getElementById('exporter-pdf').addEventListener('click', () => {
+    exporterCoursesPDF().catch((e) => { console.error(e); toast('Export PDF impossible'); });
   });
   document.getElementById('vider-tout').addEventListener('click', () => {
     if (donnees.courses.length === 0 || window.confirm('Vider toute la liste de courses ?')) {
