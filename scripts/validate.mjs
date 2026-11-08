@@ -114,6 +114,25 @@ verifier(licence.includes('Attribution-NonCommercial-NoDerivatives 4.0'), 'LICEN
 verifier(licence.includes('Ferrus Dantioch'), 'LICENSE : mentionne Ferrus Dantioch');
 verifier(html.includes('Ferrus Dantioch') && html.includes('aide de l\'IA'), 'écran À propos : auteur + aide de l\'IA');
 
+/* 8. PWA / stockage / accessibilité. */
+const css = lire('css/styles.css');
+verifier(html.includes('apple-mobile-web-app-capable'), 'méta apple-mobile-web-app-capable (iOS)');
+verifier(html.includes('mobile-web-app-capable'), 'méta mobile-web-app-capable');
+verifier(css.includes('color-scheme:dark') && css.includes('color-scheme:light'), 'color-scheme par thème');
+verifier(app.includes('indexedDB') && app.includes('CLE_STOCKAGE'), 'stockage IndexedDB + migration localStorage');
+verifier(app.includes('compresserImage'), 'photos compressées localement');
+verifier(sw.includes('PREFIXE_CACHE') && sw.includes('crypto.subtle.digest'), 'sw.js : cache nommé par empreinte SHA-256 (plus de version manuelle)');
+verifier(!/const VERSION/.test(sw), 'sw.js : plus de numéro de version manuel');
+verifier(html.includes('id="annonce"') && html.includes('aria-live'), 'région aria-live pour les annonces de vue');
+verifier(app.includes("getElementById('unite-temp')"), 'réglage unité de température °C/°F');
+verifier(app.includes('recurrente'), 'articles récurrents dans la liste de courses');
+verifier(app.includes('rayonDe'), 'regroupement de la liste de courses par rayon');
+verifier(app.includes('fixe'), 'ingrédients à quantité fixe');
+verifier(app.includes('dupliquerRecette'), 'bouton dupliquer une recette');
+verifier(app.includes('beforeinstallprompt'), 'bouton Installer (beforeinstallprompt)');
+verifier(app.includes('navigator.share'), 'partage natif de recette');
+verifier(css.includes('@media print'), 'feuille de style d\'impression');
+
 console.log('---');
 if (echecs > 0) {
   console.error(echecs + ' vérification(s) en échec');

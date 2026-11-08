@@ -8,23 +8,28 @@ Application web progressive (PWA) de gestion de recettes de cuisine, faisant par
 
 ## Fonctionnalités
 
-- Créer, modifier, supprimer des recettes (nom, ingrédients avec quantités et unités, temps de préparation et de cuisson, température en °C avec mode four traditionnel ou chaleur tournante, parts de base, instructions).
+- Créer, modifier, **dupliquer**, supprimer des recettes (avec annulation possible) : nom, **étiquettes**, **photo du plat** (compressée localement), ingrédients avec quantités et unités (g, kg, ml, l, c.à.s, c.à.c, pincée, pièce, **quantité fixe** non mise à l'échelle), temps de préparation et de cuisson, température (affichage **°C ou °F**, mode four traditionnel ou chaleur tournante), parts de base, instructions.
 - Ajustement automatique des quantités selon le nombre de parts, avec arrondi intelligent et fractions utiles (½, ⅓, ¼).
-- Liste de courses : ajoutez des ingrédients depuis une recette, cochez-les, copiez ou videz la liste.
-- Recherche par nom ou ingrédient, filtre par temps total.
-- Thèmes clair, sombre et sombre/violet, réglage de luminosité, mode « cuisson » plein écran avec minuteur.
-- Export / import des données en JSON (sauvegarde et migration entre appareils).
-- Bouton de mise à jour quand une nouvelle version est disponible.
+- **Recherche** par nom, ingrédient, étiquette ou instruction ; **filtres** par temps total et par étiquette ; **tri** (récent, A→Z, temps).
+- Liste de courses : ajout ingrédient par ingrédient, en bloc ou manuel, **regroupée par rayon de magasin**, cases à cocher, **articles récurrents** toujours proposés, copie presse-papiers, vidage.
+- Mode « cuisson » plein écran : température, étapes en gros caractères cochables, **plusieurs minuteurs simultanés** + **minuteur par étape**, écran maintenu allumé.
+- **Partage** d'une recette (texte complet) et **impression**.
+- Thèmes clair, sombre et sombre/violet, réglage de luminosité, **bouton Installer** quand le navigateur le propose.
+- Raccourcis clavier (« / » recherche, « n » nouvelle recette), annonces lecteur d'écran, contrastes conformes.
+- Stockage **IndexedDB** (migration automatique depuis localStorage), export / import JSON (sauvegarde automatique avant import + migration entre appareils).
+- Bouton de mise à jour quand une nouvelle version est disponible (cache du service worker nommé par empreinte du contenu).
 
 ## Structure des fichiers
 
 | Fichier | Rôle |
 |---|---|
 | `index.html` | Page unique de l'application (toutes les vues) |
-| `css/styles.css` | Charte graphique Omni-Système, 3 thèmes, responsive tablette d'abord |
-| `js/app.js` | Logique complète (recettes, quantités, courses, mode cuisson, stockage, mises à jour) |
+| `css/styles.css` | Charte graphique Omni-Système, 3 thèmes, responsive tablette d'abord, impression |
+| `js/app.js` | Logique complète (recettes, quantités, courses, mode cuisson, stockage IndexedDB, photos, mises à jour) |
+| `scripts/validate.mjs` | Script de validation utilisé par la CI |
 | `manifest.webmanifest` | Manifeste PWA (installation) |
-| `sw.js` | Service worker (fonctionnement hors ligne, mises à jour) |
+| `sw.js` | Service worker (hors ligne ; nom de cache = empreinte SHA-256 du contenu) |
+| `.github/workflows/validate.yml` | CI de validation à chaque pull request |
 | `icons/` | Icônes adaptatives (d20 violet nuit : SVG, PNG 192/512, maskable) |
 | `LICENSE` | Licence Omni-Système du code (CC BY-NC-ND 4.0, © 2026 Ferrus Dantioch) |
 

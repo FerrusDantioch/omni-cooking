@@ -180,6 +180,10 @@ input:focus, select:focus, textarea:focus { border-color:var(--accent); }
 .puces { display:flex; flex-wrap:wrap; gap:6px 14px; list-style:none; margin:0; padding:0; font-family:var(--f-des); font-size:.85rem; color:var(--texte-s); }
 .carte-recette .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:6px; }
 .carte-recette .actions .bouton-secondaire, .carte-recette .actions .bouton-danger { padding:10px 14px; min-height:46px; font-size:.9rem; }
+.photo-carte { width:100%; aspect-ratio:16/9; object-fit:cover; border-radius:10px; border:1px solid var(--bordure); }
+.photo-recette { max-width:min(100%, 420px); width:100%; border-radius:14px; border:1px solid var(--bordure); }
+.photo-form { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+.apercu-photo { width:120px; height:120px; object-fit:cover; border-radius:12px; border:1px solid var(--bordure); }
 
 /* ---------- Fiche recette ---------- */
 .fiche { display:grid; gap:22px; }

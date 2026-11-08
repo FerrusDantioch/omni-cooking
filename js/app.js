@@ -129,11 +129,62 @@ function quantiteMiseAJour(ingredient, parts, partsBase) {
 }
 
 /* ------------------------------------------------------------
-   3. Stockage local (localStorage) et état de l'application
+   3. Stockage local et état de l'application
+   Les données (recettes, courses, réglages) sont stockées dans
+   IndexedDB (robuste, grand quota) ; les photos y sont aussi
+   conservées (blobs JPEG compressés). À l'ouverture d'une version
+   antérieure (localStorage), les données sont migrées automatiquement.
+   Repli sur localStorage si IndexedDB est indisponible.
    ------------------------------------------------------------ */
 
-const CLE_STOCKAGE = 'omni-cooking-v1';
+const CLE_STOCKAGE = 'omni-cooking-v1'; // clé localStorage (migration depuis les anciennes versions)
+const NOM_BD = 'omni-cooking-db';
 const VERSION_DONNEES = 1;
+
+let db = null;
+
+/* Ouvre (ou crée) la base IndexedDB : magasin « kv » (données) + « photos ». */
+function ouvrirBD() {
+  if (db) return Promise.resolve(db);
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') { reject(new Error('IndexedDB indisponible')); return; }
+    const rq = indexedDB.open(NOM_BD, 1);
+    rq.onupgradeneeded = () => {
+      const b = rq.result;
+      if (!b.objectStoreNames.contains('kv')) b.createObjectStore('kv');
+      if (!b.objectStoreNames.contains('photos')) b.createObjectStore('photos');
+    };
+    rq.onsuccess = () => { db = rq.result; resolve(db); };
+    rq.onerror = () => reject(rq.error);
+  });
+}
+
+function bdPut(store, cle, valeur) {
+  return ouvrirBD().then((b) => new Promise((res, rej) => {
+    const tx = b.transaction(store, 'readwrite');
+    tx.objectStore(store).put(valeur, cle);
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+    tx.onabort = () => rej(tx.error);
+  }));
+}
+
+function bdGet(store, cle) {
+  return ouvrirBD().then((b) => new Promise((res, rej) => {
+    const rq = b.transaction(store, 'readonly').objectStore(store).get(cle);
+    rq.onsuccess = () => res(rq.result);
+    rq.onerror = () => rej(rq.error);
+  }));
+}
+
+function bdDel(store, cle) {
+  return ouvrirBD().then((b) => new Promise((res, rej) => {
+    const tx = b.transaction(store, 'readwrite');
+    tx.objectStore(store).delete(cle);
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+  }));
+}
 
 /* Toutes les données de l'application. */
 let donnees = {
@@ -144,21 +195,10 @@ let donnees = {
 
 /* Structure d'une recette :
    { id, nom, partsBase, partsActuelles, tempsPreparation, tempsCuisson,
-     temperature (number ou null), modeFour ('traditionnel'|'tournante'),
-     ingredients: [{ id, nom, quantite, unite }], instructions,
-     creeLe, modifieLe } */
-
-function sauvegarder() {
-  try {
-    localStorage.setItem(CLE_STOCKAGE, JSON.stringify(donnees));
-  } catch (e) {
-    console.error('Omni-Cooking : sauvegarde impossible', e);
-    /* Quota dépassé ou stockage indisponible : prévenir l'utilisateur. */
-    if (typeof document !== 'undefined') {
-      toast('⚠ Stockage plein : exportez vos données en JSON depuis les Réglages pour ne rien perdre.');
-    }
-  }
-}
+     temperature (number ou null, toujours en °C), modeFour ('traditionnel'|'tournante'),
+     ingredients: [{ id, nom, quantite, unite, fixe }], etiquettes: [string],
+     photo (booléen : une photo existe dans IndexedDB sous la clé id),
+     instructions, creeLe, modifieLe } */
 
 /* Normalise une recette lue depuis le stockage ou un import. */
 function normaliserRecette(r) {
@@ -182,16 +222,50 @@ function normaliserRecette(r) {
   };
 }
 
-/* Charge les données ; au tout premier lancement, propose une recette de démonstration. */
-function chargerDonnees() {
+/* Sauvegarde (asynchrone, non bloquante) : IndexedDB d'abord, localStorage en repli. */
+async function sauvegarder() {
   try {
-    const brut = localStorage.getItem(CLE_STOCKAGE);
-    if (brut === null) {
-      donnees.recettes = [recetteDemo()];
-      sauvegarder();
+    if (typeof indexedDB !== 'undefined') {
+      await bdPut('kv', 'data', donnees);
       return;
     }
-    const lu = JSON.parse(brut);
+    localStorage.setItem(CLE_STOCKAGE, JSON.stringify(donnees));
+  } catch (e) {
+    console.error('Omni-Cooking : sauvegarde impossible', e);
+    try {
+      localStorage.setItem(CLE_STOCKAGE, JSON.stringify(donnees));
+    } catch (e2) {
+      /* Quota dépassé partout : prévenir l'utilisateur. */
+      if (typeof document !== 'undefined') {
+        toast('⚠ Stockage plein : exportez vos données en JSON depuis les Réglages pour ne rien perdre.');
+      }
+    }
+  }
+}
+
+/* Charge les données (avec migration depuis localStorage si besoin) ;
+   au tout premier lancement, propose une recette de démonstration. */
+async function chargerDonnees() {
+  try {
+    let lu = null;
+    if (typeof indexedDB !== 'undefined') {
+      try { lu = await bdGet('kv', 'data'); } catch (e) { console.error('Omni-Cooking : lecture IndexedDB', e); }
+    }
+    if (!lu) {
+      const brut = localStorage.getItem(CLE_STOCKAGE);
+      if (brut !== null) {
+        lu = JSON.parse(brut);
+        /* Migration : recopie dans IndexedDB pour les prochaines ouvertures. */
+        if (typeof indexedDB !== 'undefined') {
+          try { await bdPut('kv', 'data', lu); } catch (e) { /* localStorage suffit en repli */ }
+        }
+      }
+    }
+    if (!lu) {
+      donnees.recettes = [recetteDemo()];
+      await sauvegarder();
+      return;
+    }
     donnees = {
       recettes: (lu.recettes || []).map(normaliserRecette),
       courses: (lu.courses || [])
@@ -203,6 +277,45 @@ function chargerDonnees() {
     console.error('Omni-Cooking : données illisibles, réinitialisation', e);
     donnees = { recettes: [recetteDemo()], courses: [], reglages: { theme: 'nuit', luminosite: 100, tri: 'modifie', uniteTemp: 'C' } };
   }
+}
+
+/* ------------------------------------------------------------
+   3b. Photos des recettes (compressées localement, stockées dans IndexedDB)
+   ------------------------------------------------------------ */
+
+/* Compresse une image en JPEG (max 1200 px de côté, qualité 0,82). */
+async function compresserImage(fichier, maxDim) {
+  const limite = maxDim || 1200;
+  const url = URL.createObjectURL(fichier);
+  try {
+    const img = await new Promise((res, rej) => {
+      const i = new Image();
+      i.onload = () => res(i);
+      i.onerror = () => rej(new Error('image illisible'));
+      i.src = url;
+    });
+    const ratio = Math.min(1, limite / Math.max(img.width, img.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(img.width * ratio));
+    canvas.height = Math.max(1, Math.round(img.height * ratio));
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    return await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.82));
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/* Élément <img> pour une recette ayant une photo (src remplie dès que le blob est lu). */
+function imageRecette(r, classe) {
+  const img = el('img', { class: classe, alt: 'Photo de ' + r.nom, loading: 'lazy' });
+  if (r.photo && typeof indexedDB !== 'undefined') {
+    bdGet('photos', r.id)
+      .then((blob) => { if (blob) img.src = URL.createObjectURL(blob); })
+      .catch(() => {});
+  } else {
+    img.hidden = true;
+  }
+  return img;
 }
 
 /* Recette de démonstration affichée au premier lancement (supprimable). */
@@ -418,6 +531,7 @@ function rendreAccueil() {
     if (r.temperature) puces.append(puceTexte('🌡', formaterTemperature(r.temperature) + temperatureSecondaire(r.temperature)));
     if (r.etiquettes.length > 0) puces.append(el('li', { class: 'puce' }, '🏷 ', el('b', { text: r.etiquettes.join(', ') })));
     liste.append(el('article', { class: 'carte-recette' },
+      r.photo ? imageRecette(r, 'photo-carte') : null,
       el('h2', {}, el('a', { href: '#/recette/' + r.id, text: r.nom })),
       puces,
       el('div', { class: 'actions' },
@@ -476,8 +590,8 @@ async function partagerRecette(r) {
   }
 }
 
-/* Duplique une recette (nouveaux identifiants, nom suffixé « (copie) »). */
-function dupliquerRecette(id) {
+/* Duplique une recette (nouveaux identifiants, nom suffixé « (copie) »), photo comprise. */
+async function dupliquerRecette(id) {
   const r = donnees.recettes.find((x) => x.id === id);
   if (!r) return;
   const copie = normaliserRecette(JSON.parse(JSON.stringify({
@@ -488,6 +602,12 @@ function dupliquerRecette(id) {
     modifieLe: new Date().toISOString()
   })));
   copie.ingredients = copie.ingredients.map((i) => ({ ...i, id: uid() }));
+  if (r.photo && typeof indexedDB !== 'undefined') {
+    try {
+      const blob = await bdGet('photos', r.id);
+      if (blob) await bdPut('photos', copie.id, blob);
+    } catch (e) { copie.photo = false; }
+  }
   donnees.recettes.push(copie);
   sauvegarder();
   toast('Recette dupliquée : « ' + copie.nom + ' »');
@@ -573,7 +693,8 @@ function rendreFiche(id) {
     el('a', { href: '#/', class: 'discret' }, '← Toutes les recettes'),
     el('div', { class: 'fiche-entete' },
       el('h1', { id: 'titre-fiche', text: r.nom }),
-      puces
+      puces,
+      r.photo ? imageRecette(r, 'photo-recette') : null
     ),
     el('div', { class: 'selecteur-parts' },
       el('strong', { text: 'Parts :' }),
@@ -640,6 +761,33 @@ function rendreFormulaire(id) {
   );
   const champInstructions = el('textarea', { id: 'f-instructions', placeholder: 'Une étape par ligne…' }, existant ? existant.instructions : '');
 
+  /* Photo du plat : sélection, aperçu, suppression (stockée compressée dans IndexedDB). */
+  const champPhoto = el('input', { type: 'file', id: 'f-photo', accept: 'image/*', 'aria-label': 'Photo du plat' });
+  const apercu = el('img', { class: 'apercu-photo', alt: 'Aperçu de la photo', hidden: 'true' });
+  const boutonSupprPhoto = el('button', { class: 'bouton-secondaire', type: 'button', hidden: 'true', onclick: () => {
+    form._photoFile = null;
+    form._photoSupprimee = true;
+    champPhoto.value = '';
+    apercu.hidden = true;
+    apercu.removeAttribute('src');
+    boutonSupprPhoto.hidden = true;
+  } }, 'Supprimer la photo');
+  champPhoto.addEventListener('change', () => {
+    const fichier = champPhoto.files && champPhoto.files[0];
+    form._photoFile = fichier || null;
+    form._photoSupprimee = false;
+    if (fichier) {
+      apercu.src = URL.createObjectURL(fichier);
+      apercu.hidden = false;
+      boutonSupprPhoto.hidden = false;
+    }
+  });
+  if (existant && existant.photo && typeof indexedDB !== 'undefined') {
+    bdGet('photos', existant.id).then((blob) => {
+      if (blob) { apercu.src = URL.createObjectURL(blob); apercu.hidden = false; boutonSupprPhoto.hidden = false; }
+    }).catch(() => {});
+  }
+
   /* Lignes d'ingrédients dynamiques. */
   const blocLignes = el('div', { class: 'ingredients-form', id: 'f-ingredients' });
   function ligneIngredient(ing) {
@@ -695,18 +843,25 @@ function rendreFormulaire(id) {
     el('div', { class: 'champ' },
       el('label', { for: 'f-instructions', text: 'Instructions / notes (une étape par ligne)' }), champInstructions
     ),
+    el('fieldset', { class: 'groupe' },
+      el('legend', { text: 'Photo du plat (optionnel)' }),
+      el('p', { class: 'indice', text: 'L\'image est compressée sur l\'appareil (JPEG, max 1200 px) et stockée localement, jamais envoyée en ligne.' }),
+      el('div', { class: 'photo-form' }, champPhoto, apercu, boutonSupprPhoto)
+    ),
     el('div', { class: 'form-actions' },
       el('button', { class: 'bouton', type: 'submit', text: existant ? 'Enregistrer les modifications' : 'Créer la recette' }),
       el('a', { class: 'bouton-secondaire', href: existant ? '#/recette/' + existant.id : '#/', text: 'Annuler' })
     )
   );
   formulaire._blocLignes = blocLignes;
+  formulaire._photoFile = null;
+  formulaire._photoSupprimee = false;
   conteneur.append(formulaire);
   champNom.focus();
 }
 
-/* Enregistrement du formulaire (création ou modification). */
-function enregistrerRecette(form, existant) {
+/* Enregistrement du formulaire (création ou modification), avec la photo éventuelle. */
+async function enregistrerRecette(form, existant) {
   const nom = form.querySelector('#f-nom').value.trim();
   if (!nom) { toast(' Donnez un nom à la recette.'); form.querySelector('#f-nom').focus(); return; }
   const partsBase = Math.max(1, parseInt(form.querySelector('#f-parts').value, 10) || 1);
@@ -737,6 +892,21 @@ function enregistrerRecette(form, existant) {
     creeLe: existant ? existant.creeLe : new Date().toISOString(),
     modifieLe: new Date().toISOString()
   };
+  /* Photo : compressée puis stockée dans IndexedDB, ou supprimée. */
+  if (form._photoFile) {
+    try {
+      const blob = await compresserImage(form._photoFile);
+      if (typeof indexedDB !== 'undefined') await bdPut('photos', recette.id, blob);
+      recette.photo = true;
+    } catch (e) {
+      console.error('Omni-Cooking : photo non enregistrée', e);
+      recette.photo = existant ? !!existant.photo : false;
+      toast('Photo non enregistrée (image illisible ?)');
+    }
+  } else if (form._photoSupprimee) {
+    try { if (typeof indexedDB !== 'undefined') await bdDel('photos', recette.id); } catch (e) { /* tant pis */ }
+    recette.photo = false;
+  }
   if (existant) {
     donnees.recettes = donnees.recettes.map((r) => (r.id === recette.id ? recette : r));
   } else {
@@ -1302,8 +1472,8 @@ function router() {
    12. Initialisation
    ------------------------------------------------------------ */
 
-function init() {
-  chargerDonnees();
+async function init() {
+  await chargerDonnees();
 
   /* Toast de confirmation après une mise à jour appliquée (rechargement). */
   try {
@@ -1413,8 +1583,9 @@ function init() {
 
 /* Lancement uniquement dans un navigateur. */
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-  else init();
+  const lancer = () => { init().catch((e) => console.error('Omni-Cooking : initialisation', e)); };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', lancer);
+  else lancer();
 }
 
 /* Export des fonctions pures pour les tests (Node). */
