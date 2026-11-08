@@ -132,6 +132,15 @@
     </fieldset>
 
     <fieldset class="groupe">
+      <legend><label for="unite-temp">Unité de température</label></legend>
+      <select id="unite-temp">
+        <option value="C">°C (Celsius)</option>
+        <option value="F">°F (Fahrenheit)</option>
+      </select>
+      <p class="discret">Les températures sont toujours stockées en °C ; ce réglage ne change que l'affichage.</p>
+    </fieldset>
+
+    <fieldset class="groupe">
       <legend><label for="luminosite">Luminosité de l'écran (utile le soir en cuisine)</label></legend>
       <div class="ligne-luminosite">
         <input type="range" id="luminosite" min="30" max="100" step="5" value="100">

@@ -300,17 +300,29 @@ input:focus, select:focus, textarea:focus { border-color:var(--accent); }
 }
 .thermo { font-family:var(--f-titre); font-weight:800; font-size:clamp(2.6rem, 9vw, 5rem); color:var(--accent); line-height:1; }
 .thermo small { display:block; font-family:var(--f-texte); font-weight:400; font-size:clamp(1rem, 2.6vw, 1.4rem); color:var(--texte-s); margin-top:8px; }
-.minuteur { display:grid; gap:10px; justify-items:center; }
-.minuteur .temps {
-  font-family:var(--f-des); font-weight:700;
-  font-size:clamp(3.4rem, 14vw, 7.5rem); line-height:1; font-variant-numeric:tabular-nums;
+.minuteurs-groupe { display:grid; gap:16px; justify-items:center; flex:1; min-width:min(100%, 320px); }
+.bloc-minuteurs { display:grid; gap:12px; width:100%; }
+.minuteur-ligne {
+  display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:center;
+  background:var(--fond); border:1px solid var(--bordure); border-radius:14px; padding:14px 16px;
 }
-.minuteur .temps.termine { color:var(--danger); animation:flash 1s step-start infinite; }
+.minuteur-ligne.termine { border-color:var(--danger); }
+.min-label { width:12em; font-family:var(--f-titre); font-weight:700; }
+.min-duree, .min-etape { width:5.5em; text-align:center; font-family:var(--f-des); font-weight:700; }
+.min-unite { color:var(--texte-s); font-size:.9rem; }
+.temps {
+  font-family:var(--f-des); font-weight:700;
+  font-size:clamp(2.2rem, 8vw, 4rem); line-height:1; font-variant-numeric:tabular-nums;
+}
+.temps.termine, .temps-etape.termine { color:var(--danger); animation:flash 1s step-start infinite; }
 @keyframes flash { 50% { opacity:.35; } }
-.minuteur .controles { display:flex; gap:12px; flex-wrap:wrap; justify-content:center; }
-.minuteur .controles .bouton, .minuteur .controles .bouton-secondaire { min-height:60px; padding:16px 26px; font-size:1.1rem; }
-.minuteur .reglage-temps { display:flex; align-items:center; gap:10px; font-size:1.05rem; color:var(--texte-s); }
-.minuteur .reglage-temps input { width:90px; text-align:center; font-family:var(--f-des); font-weight:700; min-height:48px; }
+.controles-etape {
+  display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap;
+  margin-left:14px; vertical-align:middle;
+}
+.min-etape { min-height:44px; }
+.temps-etape { font-family:var(--f-des); font-weight:700; font-size:clamp(1.1rem, 3vw, 1.6rem); font-variant-numeric:tabular-nums; }
+.etapes-cuisson li.termine { border-color:var(--danger); }
 .etapes-cuisson { list-style:none; margin:0; padding:0; display:grid; gap:14px; counter-reset:etape; }
 .etapes-cuisson li {
   counter-increment:etape; display:flex; gap:16px; align-items:baseline;

@@ -71,8 +71,10 @@ if (bloc) {
 const app = lire('js/app.js');
 const html = lire('index.html');
 const idsHtml = new Set([...html.matchAll(/id="([^"]+)"/g)].map((m) => m[1]));
+/* id aussi créés dynamiquement par app.js via el(…, { id: '…' }) */
+const idsCrees = new Set([...app.matchAll(/el\([^)]*?\{[^}]*?id:\s*'([^']+)'/gs)].map((m) => m[1]));
 const idsJs = new Set([...app.matchAll(/getElementById\('([^']+)'\)/g)].map((m) => m[1]));
-const manquants = [...idsJs].filter((id) => !idsHtml.has(id));
+const manquants = [...idsJs].filter((id) => !idsHtml.has(id) && !idsCrees.has(id));
 verifier(manquants.length === 0, 'id utilisés par app.js présents dans index.html' + (manquants.length ? ' — manquants : ' + manquants.join(', ') : ''));
 
 /* 5. Références locales de index.html (src/href) : tout existe. */

@@ -770,28 +770,101 @@ function rendreCourses() {
 }
 
 /* ------------------------------------------------------------
-   7. Mode cuisson plein écran + minuteur
+   7. Mode cuisson plein écran + minuteurs (plusieurs simultanés,
+      dont un minuteur facultatif par étape)
    ------------------------------------------------------------ */
 
 let recetteEnCuisson = null;
-let minuteur = { actif: false, finAt: 0, restantMs: 0, intervalle: null };
 let wakeLock = null;
+
+/* Moteur de minuteurs : plusieurs minuteurs peuvent tourner en même temps. */
+const minuteurs = new Map(); // id -> { id, label, dureeMs, finAt, restantMs, actif, affichage, ligne, bouton }
+let tickGlobal = null;
+
+function assurerTick() {
+  if (!tickGlobal) tickGlobal = setInterval(tickMinuteurs, 200);
+}
+
+function tickMinuteurs() {
+  let encoreActif = false;
+  for (const m of minuteurs.values()) {
+    if (!m.actif) continue;
+    const restant = m.finAt - Date.now();
+    if (restant <= 0) {
+      m.restantMs = 0;
+      m.actif = false;
+      if (m.affichage) { m.affichage.textContent = '00:00'; m.affichage.classList.add('termine'); }
+      if (m.ligne) m.ligne.classList.add('termine');
+      if (m.bouton) m.bouton.textContent = m.ligne ? '⏱' : '▶ Démarrer';
+      signalerFin();
+    } else {
+      encoreActif = true;
+      if (m.affichage) m.affichage.textContent = formaterDuree(restant);
+    }
+  }
+  if (!encoreActif) { clearInterval(tickGlobal); tickGlobal = null; }
+}
+
+function ajouterMinuteur(label, dureeMs) {
+  const id = uid();
+  minuteurs.set(id, { id, label, dureeMs, finAt: 0, restantMs: dureeMs, actif: false, affichage: null, ligne: null, bouton: null });
+  return id;
+}
+
+function basculerMinuteur(id) {
+  const m = minuteurs.get(id);
+  if (!m) return;
+  if (m.actif) {
+    m.restantMs = Math.max(0, m.finAt - Date.now());
+    m.actif = false;
+  } else {
+    const duree = m.restantMs > 0 ? m.restantMs : m.dureeMs;
+    m.finAt = Date.now() + duree;
+    m.restantMs = duree;
+    m.actif = true;
+    assurerTick();
+  }
+  if (recetteEnCuisson) rendreMinuteursCuisson();
+}
+
+function reinitialiserMinuteur(id) {
+  const m = minuteurs.get(id);
+  if (!m) return;
+  m.actif = false;
+  m.restantMs = m.dureeMs;
+  m.finAt = 0;
+  if (recetteEnCuisson) rendreMinuteursCuisson();
+}
+
+function supprimerMinuteur(id) {
+  minuteurs.delete(id);
+  if (recetteEnCuisson) rendreMinuteursCuisson();
+}
+
+function arreterTousLesMinuteurs() {
+  for (const m of minuteurs.values()) m.actif = false;
+  minuteurs.clear();
+  if (tickGlobal) { clearInterval(tickGlobal); tickGlobal = null; }
+}
 
 function ouvrirModeCuisson(id) {
   const r = donnees.recettes.find((x) => x.id === id);
   if (!r) return;
   recetteEnCuisson = r;
+  arreterTousLesMinuteurs();
+  /* Minuteur principal pré-rempli avec le temps de cuisson de la recette. */
+  ajouterMinuteur('Cuisson', (r.tempsCuisson || 30) * 60000);
   rendreModeCuisson();
   const overlay = document.getElementById('mode-cuisson');
   overlay.hidden = false;
   document.body.style.overflow = 'hidden';
   const p = overlay.requestFullscreen ? overlay.requestFullscreen() : null;
-  if (p && p.catch) p.catch(() => {}); // le plein écran peut être refusé : l'overlay reste plein écran via CSS
+  if (p && p.catch) p.catch(() => {}); // plein écran refusé : l'overlay reste plein écran via CSS
   demanderVigilance();
 }
 
 function fermerModeCuisson() {
-  arreterMinuteur();
+  arreterTousLesMinuteurs();
   recetteEnCuisson = null;
   document.getElementById('mode-cuisson').hidden = true;
   document.body.style.overflow = '';
@@ -813,28 +886,12 @@ function rendreModeCuisson() {
   if (!r) return;
 
   const thermo = r.temperature
-    ? el('div', { class: 'thermo' }, r.temperature + ' °C',
+    ? el('div', { class: 'thermo' },
+        formaterTemperature(r.temperature) + temperatureSecondaire(r.temperature),
         el('small', { text: r.modeFour === 'tournante' ? 'chaleur tournante' : 'four traditionnel' }))
     : el('div', { class: 'thermo' }, '—', el('small', { text: 'cuisson à la poêle / sans four' }));
 
-  const champMinutes = el('input', {
-    type: 'number', min: '1', max: '999', step: '1', value: r.tempsCuisson || 30,
-    'aria-label': 'Durée du minuteur en minutes'
-  });
-  const affichageTemps = el('div', { class: 'temps', id: 'cuisson-temps', role: 'timer', 'aria-live': 'off' }, formaterDuree((parseInt(champMinutes.value, 10) || 30) * 60000));
-  const boutonMarche = el('button', {
-    class: 'bouton', type: 'button', id: 'cuisson-marche', text: 'Démarrer',
-    onclick: () => basculerMinuteur(champMinutes, affichageTemps, boutonMarche)
-  });
-
   const etapes = r.instructions.split(/\n+/).map((s) => s.trim()).filter(Boolean);
-  const listeEtapes = el('ol', { class: 'etapes-cuisson' },
-    etapes.length > 0 ? etapes.map((e) => el('li', {
-      text: e, tabindex: '0',
-      onclick: (ev) => ev.currentTarget.classList.toggle('faite'),
-      onkeydown: (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.currentTarget.classList.toggle('faite'); } }
-    })) : el('li', { text: 'Aucune instruction enregistrée pour cette recette.' })
-  );
 
   conteneur.append(el('div', { class: 'cuisson' },
     el('div', { class: 'entete-cuisson' },
@@ -843,24 +900,114 @@ function rendreModeCuisson() {
     ),
     el('div', { class: 'cuisson-visuel' },
       thermo,
-      el('div', { class: 'minuteur' },
-        affichageTemps,
-        el('div', { class: 'reglage-temps' }, el('label', { for: champMinutes.id || 'cuisson-duree', text: 'Minuteur (min) :' }), champMinutes),
-        el('div', { class: 'controles' },
-          boutonMarche,
-          el('button', {
-            class: 'bouton-secondaire', type: 'button',
-            onclick: () => { reinitialiserMinuteur(champMinutes, affichageTemps, boutonMarche); }
-          }, 'Réinitialiser')
-        )
+      el('div', { class: 'minuteurs-groupe' },
+        el('div', { class: 'bloc-minuteurs', id: 'cuisson-minuteurs' }),
+        el('button', {
+          class: 'bouton-secondaire', type: 'button',
+          onclick: () => { ajouterMinuteur('Minuteur ' + (minuteurs.size + 1), 5 * 60000); rendreMinuteursCuisson(); }
+        }, '＋ Ajouter un minuteur')
       )
     ),
     etapes.length > 0 ? el('section', { 'aria-labelledby': 'cuisson-etapes-titre' },
-      el('h2', { id: 'cuisson-etapes-titre', text: 'Étapes (touchez une étape pour la valider)' }),
-      listeEtapes
+      el('h2', { id: 'cuisson-etapes-titre', text: 'Étapes (touchez une étape pour la valider ; ⏱ lance un minuteur sur l\'étape)' }),
+      el('ol', { class: 'etapes-cuisson', id: 'cuisson-etapes' }, etapes.map((texteEtape, i) => rendreEtapeCuisson(texteEtape, i)))
     ) : null
   ));
-  champMinutes.id = 'cuisson-duree';
+  rendreMinuteursCuisson();
+}
+
+/* Liste des minuteurs globaux (un par ligne, gérable individuellement). */
+function rendreMinuteursCuisson() {
+  const bloc = document.getElementById('cuisson-minuteurs');
+  if (!bloc) return;
+  bloc.textContent = '';
+  for (const m of minuteurs.values()) {
+    const champLabel = el('input', {
+      type: 'text', class: 'min-label', value: m.label, maxlength: '40', 'aria-label': 'Nom du minuteur',
+      onchange: (e) => { m.label = e.target.value.trim() || m.label; }
+    });
+    const champMin = el('input', {
+      type: 'number', min: '1', max: '999', step: '1', class: 'min-duree',
+      value: Math.round(m.dureeMs / 60000), 'aria-label': 'Durée du minuteur en minutes',
+      onchange: (e) => {
+        m.dureeMs = Math.max(1, parseInt(e.target.value, 10) || 1) * 60000;
+        if (!m.actif) {
+          m.restantMs = m.dureeMs;
+          if (m.affichage) m.affichage.textContent = formaterDuree(m.restantMs);
+        }
+      }
+    });
+    const affichage = el('span', { class: 'temps' + (m.restantMs === 0 && !m.actif ? ' termine' : ''), text: formaterDuree(m.restantMs) });
+    const bouton = el('button', {
+      class: 'bouton', type: 'button',
+      text: m.actif ? '⏸ Pause' : (m.restantMs > 0 && m.restantMs < m.dureeMs ? '▶ Reprendre' : '▶ Démarrer'),
+      onclick: () => basculerMinuteur(m.id)
+    });
+    m.affichage = affichage;
+    m.bouton = bouton;
+    bloc.append(el('div', { class: 'minuteur-ligne' + (m.restantMs === 0 && !m.actif ? ' termine' : '') },
+      champLabel,
+      champMin,
+      el('span', { class: 'min-unite', text: 'min' }),
+      affichage,
+      bouton,
+      el('button', { class: 'bouton-secondaire', type: 'button', onclick: () => reinitialiserMinuteur(m.id) }, 'Réinitialiser'),
+      el('button', { class: 'bouton-petit', type: 'button', 'aria-label': 'Supprimer ce minuteur', title: 'Supprimer', onclick: () => supprimerMinuteur(m.id) }, '✕')
+    ));
+  }
+}
+
+/* Une étape de la recette, avec son propre minuteur facultatif. */
+function rendreEtapeCuisson(texteEtape, index) {
+  const li = el('li', {
+    tabindex: '0',
+    onclick: (ev) => { if (ev.target.closest && ev.target.closest('.controles-etape')) return; ev.currentTarget.classList.toggle('faite'); },
+    onkeydown: (ev) => {
+      if ((ev.key === 'Enter' || ev.key === ' ') && !(ev.target.closest && ev.target.closest('.controles-etape'))) {
+        ev.preventDefault();
+        ev.currentTarget.classList.toggle('faite');
+      }
+    }
+  }, texteEtape);
+
+  const champMin = el('input', {
+    type: 'number', min: '1', max: '999', step: '1', value: '5', class: 'min-etape',
+    'aria-label': 'Minutes du minuteur de cette étape'
+  });
+  const affichage = el('span', { class: 'temps-etape', text: formaterDuree(5 * 60000) });
+  const bouton = el('button', {
+    class: 'bouton-petit', type: 'button', 'aria-label': 'Démarrer / mettre en pause le minuteur de cette étape', text: '⏱',
+    onclick: (ev) => {
+      ev.stopPropagation();
+      let id = li._minuteurId;
+      if (!id) {
+        id = ajouterMinuteur('Étape ' + (index + 1), Math.max(1, parseInt(champMin.value, 10) || 5) * 60000);
+        li._minuteurId = id;
+        const m = minuteurs.get(id);
+        m.ligne = li;
+        m.affichage = affichage;
+        m.bouton = bouton;
+      }
+      basculerMinuteur(id);
+      const m = minuteurs.get(id);
+      bouton.textContent = m.actif ? '⏸' : '⏱';
+    }
+  });
+  champMin.addEventListener('click', (ev) => ev.stopPropagation());
+  champMin.addEventListener('change', () => {
+    const duree = Math.max(1, parseInt(champMin.value, 10) || 5) * 60000;
+    const m = li._minuteurId ? minuteurs.get(li._minuteurId) : null;
+    if (m) {
+      m.dureeMs = duree;
+      if (!m.actif) { m.restantMs = duree; affichage.textContent = formaterDuree(duree); }
+    } else {
+      affichage.textContent = formaterDuree(duree);
+    }
+  });
+  affichage.addEventListener('click', (ev) => ev.stopPropagation());
+
+  li.append(el('span', { class: 'controles-etape' }, champMin, el('span', { class: 'min-unite', text: 'min' }), bouton, affichage));
+  return li;
 }
 
 function formaterDuree(ms) {
@@ -872,48 +1019,7 @@ function formaterDuree(ms) {
   return h > 0 ? h + ':' + deux(m) + ':' + deux(s) : deux(m) + ':' + deux(s);
 }
 
-function basculerMinuteur(champMinutes, affichageTemps, boutonMarche) {
-  if (minuteur.actif) {
-    minuteur.restantMs = Math.max(0, minuteur.finAt - Date.now());
-    arreterMinuteur();
-    boutonMarche.textContent = 'Reprendre';
-  } else {
-    const duree = minuteur.restantMs > 0 ? minuteur.restantMs : (parseInt(champMinutes.value, 10) || 1) * 60000;
-    minuteur.finAt = Date.now() + duree;
-    minuteur.restantMs = duree;
-    minuteur.actif = true;
-    boutonMarche.textContent = 'Pause';
-    minuteur.intervalle = setInterval(() => {
-      const restant = minuteur.finAt - Date.now();
-      if (restant <= 0) {
-        minuteur.restantMs = 0;
-        arreterMinuteur();
-        affichageTemps.textContent = '00:00';
-        affichageTemps.classList.add('termine');
-        boutonMarche.textContent = 'Démarrer';
-        signalerFin();
-      } else {
-        affichageTemps.textContent = formaterDuree(restant);
-      }
-    }, 200);
-  }
-  affichageTemps.textContent = formaterDuree(minuteur.restantMs);
-}
-
-function reinitialiserMinuteur(champMinutes, affichageTemps, boutonMarche) {
-  arreterMinuteur();
-  minuteur.restantMs = (parseInt(champMinutes.value, 10) || 0) * 60000;
-  affichageTemps.classList.remove('termine');
-  affichageTemps.textContent = formaterDuree(minuteur.restantMs);
-  boutonMarche.textContent = 'Démarrer';
-}
-
-function arreterMinuteur() {
-  minuteur.actif = false;
-  if (minuteur.intervalle) { clearInterval(minuteur.intervalle); minuteur.intervalle = null; }
-}
-
-/* Son + vibration à la fin du minuteur. */
+/* Son + vibration à la fin d'un minuteur. */
 function signalerFin() {
   if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 400]);
   try {
@@ -944,6 +1050,16 @@ function appliquerTheme(theme) {
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute('content', THEMES[donnees.reglages.theme]);
   document.querySelectorAll('input[name="theme"]').forEach((r) => { r.checked = r.value === donnees.reglages.theme; });
+  sauvegarder();
+}
+
+/* Unité d'affichage des températures (°C par défaut, °F possible). */
+function appliquerUniteTemp(unite) {
+  donnees.reglages.uniteTemp = unite === 'F' ? 'F' : 'C';
+  const select = document.getElementById('unite-temp');
+  if (select) select.value = donnees.reglages.uniteTemp;
+  const labelTemp = document.getElementById('label-temp');
+  if (labelTemp) labelTemp.textContent = 'Température du four (' + (uniteTemp() === 'F' ? '°F' : '°C') + ')';
   sauvegarder();
 }
 
@@ -1152,6 +1268,8 @@ function init() {
     r.addEventListener('change', () => appliquerTheme(r.value));
   });
   document.getElementById('luminosite').addEventListener('input', (e) => appliquerLuminosite(e.target.value));
+  appliquerUniteTemp(donnees.reglages.uniteTemp);
+  document.getElementById('unite-temp').addEventListener('change', (e) => { appliquerUniteTemp(e.target.value); router(); });
 
   /* Recherche et filtres. */
   document.getElementById('recherche').addEventListener('input', (e) => { rechercheTexte = e.target.value; rendreAccueil(); });
@@ -1235,6 +1353,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     UNITES, uniteBase, versBase, normaliserAffichage, arrondirQuantite,
-    formaterDenombrable, formaterQuantite, quantiteMiseAJour, normaliserTexte, normaliserRecette
+    formaterDenombrable, formaterQuantite, quantiteMiseAJour, normaliserTexte, normaliserRecette,
+    cVersF, fVersC, rayonDe, RAYONS
   };
 }
