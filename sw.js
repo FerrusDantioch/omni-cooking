@@ -19,6 +19,7 @@ const COQUILLE = [
   './',
   './index.html',
   './css/styles.css',
+  './js/pdf.js',
   './js/app.js',
   './manifest.webmanifest',
   './icons/icon.svg',

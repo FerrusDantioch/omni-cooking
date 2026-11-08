@@ -26,7 +26,7 @@ function verifier(condition, label) {
 }
 
 /* 1. Syntaxe JavaScript. */
-for (const f of ['js/app.js', 'sw.js']) {
+for (const f of ['js/app.js', 'js/pdf.js', 'sw.js']) {
   try {
     execFileSync(process.execPath, ['--check', join(racine, f)], { stdio: 'pipe' });
     verifier(true, 'syntaxe ' + f);
@@ -132,6 +132,10 @@ verifier(app.includes('dupliquerRecette'), 'bouton dupliquer une recette');
 verifier(app.includes('beforeinstallprompt'), 'bouton Installer (beforeinstallprompt)');
 verifier(app.includes('navigator.share'), 'partage natif de recette');
 verifier(css.includes('@media print'), 'feuille de style d\'impression');
+verifier(existsSync(join(racine, 'js/pdf.js')), 'générateur PDF vanilla présent (js/pdf.js)');
+verifier(app.includes('OmniPDF.creerBlob') && app.includes("getElementById('exporter-pdf')"), 'export PDF de la liste de courses branché');
+verifier(sw.includes("'./js/pdf.js'"), 'js/pdf.js mis en cache par le service worker');
+verifier(html.includes('js/pdf.js'), 'index.html charge js/pdf.js');
 
 console.log('---');
 if (echecs > 0) {

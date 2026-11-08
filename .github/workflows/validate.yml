@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [vibe/omni-cooking-pwa-fe8c11]
+    branches: ['vibe/*']
 
 jobs:
   validation:
