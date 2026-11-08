@@ -375,3 +375,16 @@ input:focus, select:focus, textarea:focus { border-color:var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   * { animation:none !important; transition:none !important; }
 }
+
+/* ---------- Impression : la fiche recette, lisible en noir sur blanc ---------- */
+@media print {
+  .entete, .saut, .barre-actions .bouton, .actions-ligne, .actions,
+  .selecteur-parts .groupe-boutons, .ajouter-courses, .ajout-article,
+  #toast, #voile, #mode-cuisson, .puces-filtre, .recherche { display:none !important; }
+  body { background:#fff; color:#000; font-size:12pt; }
+  main { max-width:none; padding:0; }
+  .fiche, .groupe, .carte-recette { border:1px solid #999; border-radius:8px; }
+  a { color:#000; text-decoration:none; }
+  .puce, .badge-fixe { border-color:#999; color:#000; }
+  .qte { color:#000; }
+}

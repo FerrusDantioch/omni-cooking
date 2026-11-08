@@ -433,6 +433,49 @@ function rendreAccueil() {
   document.getElementById('tri').value = donnees.reglages.tri || 'modifie';
 }
 
+/* Texte complet d'une recette (pour partage / copie / impression). */
+function recetteEnTexte(r) {
+  const lignes = [r.nom];
+  const infos = ['Parts : ' + r.partsBase];
+  if (r.tempsPreparation) infos.push('prépa ' + r.tempsPreparation + ' min');
+  if (r.tempsCuisson) infos.push('cuisson ' + r.tempsCuisson + ' min');
+  lignes.push(infos.join(' — '));
+  if (r.temperature) {
+    lignes.push('Four : ' + formaterTemperature(r.temperature) + temperatureSecondaire(r.temperature) +
+      ' (' + (r.modeFour === 'tournante' ? 'chaleur tournante' : 'traditionnel') + ')');
+  }
+  if (r.etiquettes.length > 0) lignes.push('Étiquettes : ' + r.etiquettes.join(', '));
+  lignes.push('', 'Ingrédients (pour ' + r.partsBase + (r.partsBase > 1 ? ' parts' : ' part') + ') :');
+  for (const ing of r.ingredients) {
+    lignes.push('• ' + formaterQuantite(ing.quantite, ing.unite) + ' ' + ing.nom + (ing.fixe ? ' (qte fixe)' : ''));
+  }
+  const etapes = r.instructions.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+  if (etapes.length > 0) {
+    lignes.push('', 'Instructions :');
+    etapes.forEach((e, i) => lignes.push((i + 1) + '. ' + e));
+  }
+  return lignes.join('\n');
+}
+
+/* Partage natif si disponible, sinon copie dans le presse-papiers. */
+async function partagerRecette(r) {
+  const texte = recetteEnTexte(r);
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: r.nom + ' — Omni-Cooking', text: texte });
+      return;
+    } catch (e) {
+      if (e && e.name === 'AbortError') return; // partage annulé par l'utilisateur
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(texte);
+    toast('Recette copiée dans le presse-papiers');
+  } catch (e) {
+    toast('Partage indisponible : ouvrez la recette et copiez son texte.');
+  }
+}
+
 /* Duplique une recette (nouveaux identifiants, nom suffixé « (copie) »). */
 function dupliquerRecette(id) {
   const r = donnees.recettes.find((x) => x.id === id);
@@ -563,6 +606,8 @@ function rendreFiche(id) {
     el('div', { class: 'actions-ligne' },
       el('a', { class: 'bouton', href: '#/recette/' + r.id + '/modifier' }, 'Modifier'),
       el('button', { class: 'bouton-secondaire', type: 'button', onclick: () => dupliquerRecette(r.id) }, 'Dupliquer'),
+      el('button', { class: 'bouton-secondaire', type: 'button', onclick: () => partagerRecette(r) }, '↗ Partager'),
+      el('button', { class: 'bouton-secondaire', type: 'button', onclick: () => window.print() }, '🖨 Imprimer'),
       el('button', { class: 'bouton', type: 'button', onclick: () => ouvrirModeCuisson(r.id) }, '🔥 Mode cuisson'),
       el('button', { class: 'bouton-danger', type: 'button', onclick: () => supprimerRecette(r.id) }, 'Supprimer')
     )
@@ -1222,6 +1267,15 @@ function surveillerMisesAJour() {
 function router() {
   const parties = (location.hash || '#/').replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
   const [vue, arg, sous] = parties;
+  /* Annonce du changement de vue aux lecteurs d'écran. */
+  const annonce = document.getElementById('annonce');
+  if (annonce) {
+    const titres = { accueil: 'Mes recettes', recette: 'Fiche de la recette', nouvelle: 'Formulaire de recette', formulaire: 'Formulaire de recette', courses: 'Liste de courses', reglages: 'Réglages', apropos: 'À propos' };
+    let texte = 'Vue : ' + (titres[vue || 'accueil'] || vue || 'accueil');
+    const r = arg ? donnees.recettes.find((x) => x.id === arg) : null;
+    if (r) texte += ' — ' + r.nom;
+    annonce.textContent = texte;
+  }
   switch (vue || 'accueil') {
     case 'recette':
       if (sous === 'modifier' && arg) { afficherVue('formulaire'); rendreFormulaire(arg); }
@@ -1333,6 +1387,20 @@ function init() {
   /* Échap ferme le mode cuisson si le plein écran natif n'est pas actif. */
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !document.getElementById('mode-cuisson').hidden && !document.fullscreenElement) fermerModeCuisson();
+  });
+
+  /* Raccourcis clavier : « / » recherche, « n » nouvelle recette. */
+  document.addEventListener('keydown', (e) => {
+    const dansChamp = e.target && e.target.matches && e.target.matches('input, textarea, select, [contenteditable="true"]');
+    if (dansChamp || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === '/') {
+      e.preventDefault();
+      location.hash = '#/';
+      setTimeout(() => { const champ = document.getElementById('recherche'); if (champ) champ.focus(); }, 0);
+    } else if (e.key === 'n') {
+      e.preventDefault();
+      location.hash = '#/nouvelle';
+    }
   });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && recetteEnCuisson) demanderVigilance();
