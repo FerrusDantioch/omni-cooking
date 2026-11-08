@@ -10,6 +10,7 @@
 /* ---------- Thèmes ---------- */
 /* Sombre / violet = thème de la charte (violet nuit), thème par défaut. */
 :root, [data-theme="nuit"] {
+  color-scheme:dark;
   --nuit:#14111d; --table:#1d1929; --trait:#332c47;
   --texte:#e9e4f2; --discret:#a59cbb; --omni:#a777ff; --halo:#d6c2ff;
   --fond:var(--nuit); --surface:var(--table); --bordure:var(--trait);
@@ -22,6 +23,7 @@
 }
 /* Sombre neutre, accent violet conservé. */
 [data-theme="sombre"] {
+  color-scheme:dark;
   --fond:#161616; --surface:#222222; --bordure:#3d3d3d;
   --texte-p:#ececec; --texte-s:#b3b3b3;
   --accent:#a777ff; --accent-texte:#140d24; --accent-fond:#2a1660;
@@ -30,6 +32,7 @@
 }
 /* Clair : violet assombri pour garantir le contraste (≥ 4,5:1). */
 [data-theme="clair"] {
+  color-scheme:light;
   --fond:#f6f4fb; --surface:#ffffff; --bordure:#ddd6ee;
   --texte-p:#241f33; --texte-s:#5d5670;
   --accent:#6a35d6; --accent-texte:#ffffff; --accent-fond:#efe9fb;
@@ -131,8 +134,25 @@ section[hidden] { display:none; }
 
 /* ---------- Recherche et filtres ---------- */
 .recherche {
-  display:grid; grid-template-columns:2fr 1fr; gap:14px;
-  margin-bottom:22px;
+  display:grid; grid-template-columns:2fr 1fr 1fr; gap:14px;
+  margin-bottom:14px;
+}
+.puces-filtre { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:20px; }
+.puce-filtre {
+  font:600 .85rem var(--f-titre); letter-spacing:.03em;
+  border:1px solid var(--bordure); background:var(--surface); color:var(--texte-s);
+  border-radius:999px; padding:9px 16px; min-height:44px; cursor:pointer;
+}
+.puce-filtre:hover { border-color:var(--accent); color:var(--texte-p); }
+.puce-filtre.active { background:var(--accent); border-color:var(--accent); color:var(--accent-texte); }
+.badge-fixe {
+  font:600 .68rem var(--f-titre); letter-spacing:.06em; text-transform:uppercase;
+  color:var(--texte-s); border:1px solid var(--bordure); border-radius:999px;
+  padding:2px 9px; margin-left:9px; white-space:nowrap;
+}
+.visually-hidden {
+  position:absolute; width:1px; height:1px; overflow:hidden;
+  clip:rect(0 0 0 0); white-space:nowrap;
 }
 .champ { display:grid; gap:6px; align-content:start; }
 .champ label, legend { font-family:var(--f-titre); font-size:.85rem; letter-spacing:.06em; text-transform:uppercase; color:var(--texte-s); font-weight:700; }
@@ -160,6 +180,10 @@ input:focus, select:focus, textarea:focus { border-color:var(--accent); }
 .puces { display:flex; flex-wrap:wrap; gap:6px 14px; list-style:none; margin:0; padding:0; font-family:var(--f-des); font-size:.85rem; color:var(--texte-s); }
 .carte-recette .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:6px; }
 .carte-recette .actions .bouton-secondaire, .carte-recette .actions .bouton-danger { padding:10px 14px; min-height:46px; font-size:.9rem; }
+.photo-carte { width:100%; aspect-ratio:16/9; object-fit:cover; border-radius:10px; border:1px solid var(--bordure); }
+.photo-recette { max-width:min(100%, 420px); width:100%; border-radius:14px; border:1px solid var(--bordure); }
+.photo-form { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+.apercu-photo { width:120px; height:120px; object-fit:cover; border-radius:12px; border:1px solid var(--bordure); }
 
 /* ---------- Fiche recette ---------- */
 .fiche { display:grid; gap:22px; }
@@ -205,8 +229,9 @@ input:focus, select:focus, textarea:focus { border-color:var(--accent); }
 .formulaire { display:grid; gap:20px; max-width:760px; }
 .ligne-champs { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap:14px; }
 .ingredients-form { display:grid; gap:10px; }
-.ligne-ingredient { display:grid; grid-template-columns:1fr 110px 130px 52px; gap:10px; align-items:center; }
+.ligne-ingredient { display:grid; grid-template-columns:1fr 100px 120px 46px 52px; gap:10px; align-items:center; }
 .ligne-ingredient input, .ligne-ingredient select { min-height:52px; }
+.case-fixe { width:28px; height:28px; accent-color:var(--accent); cursor:pointer; justify-self:center; }
 .bouton-icone {
   width:52px; height:52px; border-radius:12px; border:1px solid var(--bordure);
   background:var(--danger-fond); color:var(--danger); font-size:1.3rem; cursor:pointer;
@@ -215,6 +240,11 @@ input:focus, select:focus, textarea:focus { border-color:var(--accent); }
 .indice { font-size:.9rem; color:var(--texte-s); }
 
 /* ---------- Liste de courses ---------- */
+.ajout-article { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:20px; }
+.ajout-article input { flex:1; min-width:min(100%, 220px); }
+.rayon { display:grid; gap:10px; margin-bottom:22px; }
+.rayon-titre { font-size:1rem; color:var(--accent); letter-spacing:.06em; text-transform:uppercase; }
+.bouton-etoile[aria-pressed="true"] { color:var(--accent); border-color:var(--accent); }
 .liste-courses { list-style:none; margin:0; padding:0; display:grid; gap:10px; }
 .liste-courses li {
   display:flex; align-items:center; gap:14px;
@@ -274,17 +304,29 @@ input:focus, select:focus, textarea:focus { border-color:var(--accent); }
 }
 .thermo { font-family:var(--f-titre); font-weight:800; font-size:clamp(2.6rem, 9vw, 5rem); color:var(--accent); line-height:1; }
 .thermo small { display:block; font-family:var(--f-texte); font-weight:400; font-size:clamp(1rem, 2.6vw, 1.4rem); color:var(--texte-s); margin-top:8px; }
-.minuteur { display:grid; gap:10px; justify-items:center; }
-.minuteur .temps {
-  font-family:var(--f-des); font-weight:700;
-  font-size:clamp(3.4rem, 14vw, 7.5rem); line-height:1; font-variant-numeric:tabular-nums;
+.minuteurs-groupe { display:grid; gap:16px; justify-items:center; flex:1; min-width:min(100%, 320px); }
+.bloc-minuteurs { display:grid; gap:12px; width:100%; }
+.minuteur-ligne {
+  display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:center;
+  background:var(--fond); border:1px solid var(--bordure); border-radius:14px; padding:14px 16px;
 }
-.minuteur .temps.termine { color:var(--danger); animation:flash 1s step-start infinite; }
+.minuteur-ligne.termine { border-color:var(--danger); }
+.min-label { width:12em; font-family:var(--f-titre); font-weight:700; }
+.min-duree, .min-etape { width:5.5em; text-align:center; font-family:var(--f-des); font-weight:700; }
+.min-unite { color:var(--texte-s); font-size:.9rem; }
+.temps {
+  font-family:var(--f-des); font-weight:700;
+  font-size:clamp(2.2rem, 8vw, 4rem); line-height:1; font-variant-numeric:tabular-nums;
+}
+.temps.termine, .temps-etape.termine { color:var(--danger); animation:flash 1s step-start infinite; }
 @keyframes flash { 50% { opacity:.35; } }
-.minuteur .controles { display:flex; gap:12px; flex-wrap:wrap; justify-content:center; }
-.minuteur .controles .bouton, .minuteur .controles .bouton-secondaire { min-height:60px; padding:16px 26px; font-size:1.1rem; }
-.minuteur .reglage-temps { display:flex; align-items:center; gap:10px; font-size:1.05rem; color:var(--texte-s); }
-.minuteur .reglage-temps input { width:90px; text-align:center; font-family:var(--f-des); font-weight:700; min-height:48px; }
+.controles-etape {
+  display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap;
+  margin-left:14px; vertical-align:middle;
+}
+.min-etape { min-height:44px; }
+.temps-etape { font-family:var(--f-des); font-weight:700; font-size:clamp(1.1rem, 3vw, 1.6rem); font-variant-numeric:tabular-nums; }
+.etapes-cuisson li.termine { border-color:var(--danger); }
 .etapes-cuisson { list-style:none; margin:0; padding:0; display:grid; gap:14px; counter-reset:etape; }
 .etapes-cuisson li {
   counter-increment:etape; display:flex; gap:16px; align-items:baseline;
@@ -314,14 +356,18 @@ input:focus, select:focus, textarea:focus { border-color:var(--accent); }
   max-width:min(90vw, 480px); text-align:center; pointer-events:none;
 }
 #toast.visible { opacity:1; transform:translateX(-50%) translateY(0); }
+.toast-action {
+  font:inherit; font-weight:700; margin-left:14px; cursor:pointer;
+  background:rgba(0,0,0,.28); color:inherit; border:0; border-radius:8px; padding:7px 14px;
+}
+.toast-action:hover { background:rgba(0,0,0,.45); }
 
 /* ---------- Responsive : d'abord tablette, puis mobile et grand écran ---------- */
 @media (max-width:640px) {
   html { font-size:94%; }
   .recherche { grid-template-columns:1fr; }
-  .ligne-ingredient { grid-template-columns:1fr 96px; }
-  .ligne-ingredient .unite { grid-column:1; }
-  .ligne-ingredient .bouton-icone { grid-column:2; grid-row:2; width:100%; }
+  .ligne-ingredient { grid-template-columns:1fr 90px 46px 52px; }
+  .ligne-ingredient .unite { grid-column:1 / -1; }
   .entete { gap:8px; }
   .nav { gap:2px 12px; font-size:.88rem; width:100%; margin-left:0; }
   .carte.apropos { flex-direction:column; }
@@ -332,4 +378,17 @@ input:focus, select:focus, textarea:focus { border-color:var(--accent); }
 }
 @media (prefers-reduced-motion: reduce) {
   * { animation:none !important; transition:none !important; }
+}
+
+/* ---------- Impression : la fiche recette, lisible en noir sur blanc ---------- */
+@media print {
+  .entete, .saut, .barre-actions .bouton, .actions-ligne, .actions,
+  .selecteur-parts .groupe-boutons, .ajouter-courses, .ajout-article,
+  #toast, #voile, #mode-cuisson, .puces-filtre, .recherche { display:none !important; }
+  body { background:#fff; color:#000; font-size:12pt; }
+  main { max-width:none; padding:0; }
+  .fiche, .groupe, .carte-recette { border:1px solid #999; border-radius:8px; }
+  a { color:#000; text-decoration:none; }
+  .puce, .badge-fixe { border-color:#999; color:#000; }
+  .qte { color:#000; }
 }

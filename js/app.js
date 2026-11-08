@@ -45,6 +45,20 @@ function formatNombre(q) {
   return new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 }).format(q);
 }
 
+/* Températures : stockées en °C, affichées selon le réglage (°C ou °F). */
+function cVersF(c) { return Math.round(c * 9 / 5 + 32); }
+function fVersC(f) { return Math.round((f - 32) * 5 / 9); }
+function uniteTemp() { return donnees.reglages.uniteTemp === 'F' ? 'F' : 'C'; }
+function formaterTemperature(tC) {
+  if (tC === null || tC === undefined) return '';
+  if (uniteTemp() === 'F') return cVersF(tC) + ' °F';
+  return tC + ' °C';
+}
+function temperatureSecondaire(tC) {
+  if (tC === null || tC === undefined) return '';
+  return uniteTemp() === 'F' ? ' (' + tC + ' °C)' : ' (' + cVersF(tC) + ' °F)';
+}
+
 /* ------------------------------------------------------------
    2. Quantités : unités, arrondi intelligent, fractions
    ------------------------------------------------------------ */
@@ -107,38 +121,84 @@ function formaterQuantite(q, unite) {
 /* Quantité d'un ingrédient recalculée pour `parts` parts
    (recette de base : `partsBase` parts), avec arrondi intelligent. */
 function quantiteMiseAJour(ingredient, parts, partsBase) {
+  /* Ingrédient à « quantité fixe » (sel, poivre, liant…) : jamais mis à l'échelle. */
+  if (ingredient.fixe) return normaliserAffichage(ingredient.quantite, ingredient.unite);
   const facteur = parts / partsBase;
   const q = arrondirSelonUnite(ingredient.quantite * facteur, ingredient.unite);
   return normaliserAffichage(q, ingredient.unite);
 }
 
 /* ------------------------------------------------------------
-   3. Stockage local (localStorage) et état de l'application
+   3. Stockage local et état de l'application
+   Les données (recettes, courses, réglages) sont stockées dans
+   IndexedDB (robuste, grand quota) ; les photos y sont aussi
+   conservées (blobs JPEG compressés). À l'ouverture d'une version
+   antérieure (localStorage), les données sont migrées automatiquement.
+   Repli sur localStorage si IndexedDB est indisponible.
    ------------------------------------------------------------ */
 
-const CLE_STOCKAGE = 'omni-cooking-v1';
+const CLE_STOCKAGE = 'omni-cooking-v1'; // clé localStorage (migration depuis les anciennes versions)
+const NOM_BD = 'omni-cooking-db';
 const VERSION_DONNEES = 1;
+
+let db = null;
+
+/* Ouvre (ou crée) la base IndexedDB : magasin « kv » (données) + « photos ». */
+function ouvrirBD() {
+  if (db) return Promise.resolve(db);
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') { reject(new Error('IndexedDB indisponible')); return; }
+    const rq = indexedDB.open(NOM_BD, 1);
+    rq.onupgradeneeded = () => {
+      const b = rq.result;
+      if (!b.objectStoreNames.contains('kv')) b.createObjectStore('kv');
+      if (!b.objectStoreNames.contains('photos')) b.createObjectStore('photos');
+    };
+    rq.onsuccess = () => { db = rq.result; resolve(db); };
+    rq.onerror = () => reject(rq.error);
+  });
+}
+
+function bdPut(store, cle, valeur) {
+  return ouvrirBD().then((b) => new Promise((res, rej) => {
+    const tx = b.transaction(store, 'readwrite');
+    tx.objectStore(store).put(valeur, cle);
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+    tx.onabort = () => rej(tx.error);
+  }));
+}
+
+function bdGet(store, cle) {
+  return ouvrirBD().then((b) => new Promise((res, rej) => {
+    const rq = b.transaction(store, 'readonly').objectStore(store).get(cle);
+    rq.onsuccess = () => res(rq.result);
+    rq.onerror = () => rej(rq.error);
+  }));
+}
+
+function bdDel(store, cle) {
+  return ouvrirBD().then((b) => new Promise((res, rej) => {
+    const tx = b.transaction(store, 'readwrite');
+    tx.objectStore(store).delete(cle);
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+  }));
+}
 
 /* Toutes les données de l'application. */
 let donnees = {
   recettes: [],   // voir structure d'une recette ci-dessous
-  courses: [],    // { id, nom, quantite, unite, coche }
-  reglages: { theme: 'nuit', luminosite: 100 }
+  courses: [],    // { id, nom, quantite, unite, coche, recurrente }
+  reglages: { theme: 'nuit', luminosite: 100, tri: 'modifie', uniteTemp: 'C' }
 };
 
 /* Structure d'une recette :
    { id, nom, partsBase, partsActuelles, tempsPreparation, tempsCuisson,
-     temperature (number ou null), modeFour ('traditionnel'|'tournante'),
-     ingredients: [{ id, nom, quantite, unite }], instructions,
-     creeLe, modifieLe } */
-
-function sauvegarder() {
-  try {
-    localStorage.setItem(CLE_STOCKAGE, JSON.stringify(donnees));
-  } catch (e) {
-    console.error('Omni-Cooking : sauvegarde impossible', e);
-  }
-}
+     temperature (number ou null, toujours en °C), modeFour ('traditionnel'|'tournante'),
+     ingredients: [{ id, nom, quantite, unite, fixe }], etiquettes: [string],
+     photo (booléen : une photo existe dans IndexedDB sous la clé id),
+     instructions, creeLe, modifieLe } */
 
 /* Normalise une recette lue depuis le stockage ou un import. */
 function normaliserRecette(r) {
@@ -153,34 +213,109 @@ function normaliserRecette(r) {
     modeFour: r.modeFour === 'tournante' ? 'tournante' : 'traditionnel',
     ingredients: (Array.isArray(r.ingredients) ? r.ingredients : [])
       .filter((i) => i && i.nom && Number(i.quantite) > 0)
-      .map((i) => ({ id: i.id || uid(), nom: String(i.nom), quantite: Number(i.quantite), unite: UNITES.includes(i.unite) ? i.unite : 'pièce' })),
+      .map((i) => ({ id: i.id || uid(), nom: String(i.nom), quantite: Number(i.quantite), unite: UNITES.includes(i.unite) ? i.unite : 'pièce', fixe: !!i.fixe })),
+    etiquettes: [...new Set((Array.isArray(r.etiquettes) ? r.etiquettes : []).map((e) => String(e).trim()).filter(Boolean))].slice(0, 12),
+    photo: !!r.photo,
     instructions: String(r.instructions || ''),
     creeLe: r.creeLe || new Date().toISOString(),
     modifieLe: r.modifieLe || new Date().toISOString()
   };
 }
 
-/* Charge les données ; au tout premier lancement, propose une recette de démonstration. */
-function chargerDonnees() {
+/* Sauvegarde (asynchrone, non bloquante) : IndexedDB d'abord, localStorage en repli. */
+async function sauvegarder() {
   try {
-    const brut = localStorage.getItem(CLE_STOCKAGE);
-    if (brut === null) {
-      donnees.recettes = [recetteDemo()];
-      sauvegarder();
+    if (typeof indexedDB !== 'undefined') {
+      await bdPut('kv', 'data', donnees);
       return;
     }
-    const lu = JSON.parse(brut);
+    localStorage.setItem(CLE_STOCKAGE, JSON.stringify(donnees));
+  } catch (e) {
+    console.error('Omni-Cooking : sauvegarde impossible', e);
+    try {
+      localStorage.setItem(CLE_STOCKAGE, JSON.stringify(donnees));
+    } catch (e2) {
+      /* Quota dépassé partout : prévenir l'utilisateur. */
+      if (typeof document !== 'undefined') {
+        toast('⚠ Stockage plein : exportez vos données en JSON depuis les Réglages pour ne rien perdre.');
+      }
+    }
+  }
+}
+
+/* Charge les données (avec migration depuis localStorage si besoin) ;
+   au tout premier lancement, propose une recette de démonstration. */
+async function chargerDonnees() {
+  try {
+    let lu = null;
+    if (typeof indexedDB !== 'undefined') {
+      try { lu = await bdGet('kv', 'data'); } catch (e) { console.error('Omni-Cooking : lecture IndexedDB', e); }
+    }
+    if (!lu) {
+      const brut = localStorage.getItem(CLE_STOCKAGE);
+      if (brut !== null) {
+        lu = JSON.parse(brut);
+        /* Migration : recopie dans IndexedDB pour les prochaines ouvertures. */
+        if (typeof indexedDB !== 'undefined') {
+          try { await bdPut('kv', 'data', lu); } catch (e) { /* localStorage suffit en repli */ }
+        }
+      }
+    }
+    if (!lu) {
+      donnees.recettes = [recetteDemo()];
+      await sauvegarder();
+      return;
+    }
     donnees = {
       recettes: (lu.recettes || []).map(normaliserRecette),
       courses: (lu.courses || [])
         .filter((c) => c && c.nom)
-        .map((c) => ({ id: c.id || uid(), nom: String(c.nom), quantite: Number(c.quantite) || 0, unite: uniteBase(UNITES.includes(c.unite) ? c.unite : 'pièce'), coche: !!c.coche })),
-      reglages: Object.assign({ theme: 'nuit', luminosite: 100 }, lu.reglages || {})
+        .map((c) => ({ id: c.id || uid(), nom: String(c.nom), quantite: Number(c.quantite) || 0, unite: uniteBase(UNITES.includes(c.unite) ? c.unite : 'pièce'), coche: !!c.coche, recurrente: !!c.recurrente })),
+      reglages: Object.assign({ theme: 'nuit', luminosite: 100, tri: 'modifie', uniteTemp: 'C' }, lu.reglages || {})
     };
   } catch (e) {
     console.error('Omni-Cooking : données illisibles, réinitialisation', e);
-    donnees = { recettes: [recetteDemo()], courses: [], reglages: { theme: 'nuit', luminosite: 100 } };
+    donnees = { recettes: [recetteDemo()], courses: [], reglages: { theme: 'nuit', luminosite: 100, tri: 'modifie', uniteTemp: 'C' } };
   }
+}
+
+/* ------------------------------------------------------------
+   3b. Photos des recettes (compressées localement, stockées dans IndexedDB)
+   ------------------------------------------------------------ */
+
+/* Compresse une image en JPEG (max 1200 px de côté, qualité 0,82). */
+async function compresserImage(fichier, maxDim) {
+  const limite = maxDim || 1200;
+  const url = URL.createObjectURL(fichier);
+  try {
+    const img = await new Promise((res, rej) => {
+      const i = new Image();
+      i.onload = () => res(i);
+      i.onerror = () => rej(new Error('image illisible'));
+      i.src = url;
+    });
+    const ratio = Math.min(1, limite / Math.max(img.width, img.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(img.width * ratio));
+    canvas.height = Math.max(1, Math.round(img.height * ratio));
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    return await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.82));
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/* Élément <img> pour une recette ayant une photo (src remplie dès que le blob est lu). */
+function imageRecette(r, classe) {
+  const img = el('img', { class: classe, alt: 'Photo de ' + r.nom, loading: 'lazy' });
+  if (r.photo && typeof indexedDB !== 'undefined') {
+    bdGet('photos', r.id)
+      .then((blob) => { if (blob) img.src = URL.createObjectURL(blob); })
+      .catch(() => {});
+  } else {
+    img.hidden = true;
+  }
+  return img;
 }
 
 /* Recette de démonstration affichée au premier lancement (supprimable). */
@@ -194,12 +329,14 @@ function recetteDemo() {
     tempsCuisson: 20,
     temperature: null, // cuisson à la poêle, pas de four
     modeFour: 'traditionnel',
+    etiquettes: ['petit-déjeuner', 'rapide'],
+    photo: false,
     ingredients: [
       { id: uid(), nom: 'farine', quantite: 250, unite: 'g' },
       { id: uid(), nom: 'lait', quantite: 500, unite: 'ml' },
       { id: uid(), nom: 'œufs', quantite: 3, unite: 'pièce' },
       { id: uid(), nom: 'sucre', quantite: 2, unite: 'c.à.s' },
-      { id: uid(), nom: 'sel', quantite: 1, unite: 'pincée' }
+      { id: uid(), nom: 'sel', quantite: 1, unite: 'pincée', fixe: true }
     ],
     instructions: 'Mélanger la farine, le sucre et le sel dans un saladier.\nCreuser un puits, casser les œufs au centre et mélanger.\nVerser le lait progressivement en fouettant pour éviter les grumeaux.\nLaisser reposer 30 minutes si possible.\nCuire les crêpes à feu moyen, 1 à 2 minutes par face.',
     creeLe: new Date().toISOString(),
@@ -213,17 +350,35 @@ function recetteDemo() {
 
 let rechercheTexte = '';
 let filtreTemps = 'tous';
+let etiquetteActive = null; // filtre par étiquette (une seule active à la fois)
 
 function recettesFiltrees() {
   const recherche = normaliserTexte(rechercheTexte);
   const max = filtreTemps === 'tous' ? Infinity : parseInt(filtreTemps, 10);
-  return donnees.recettes.filter((r) => {
+  const tri = donnees.reglages.tri || 'modifie';
+  const liste = donnees.recettes.filter((r) => {
     const total = r.tempsPreparation + r.tempsCuisson;
     if (total > max) return false;
+    if (etiquetteActive && !r.etiquettes.some((e) => normaliserTexte(e) === normaliserTexte(etiquetteActive))) return false;
     if (!recherche) return true;
     if (normaliserTexte(r.nom).includes(recherche)) return true;
+    if (normaliserTexte(r.instructions).includes(recherche)) return true;
+    if (r.etiquettes.some((e) => normaliserTexte(e).includes(recherche))) return true;
     return r.ingredients.some((i) => normaliserTexte(i.nom).includes(recherche));
   });
+  const cmp = {
+    nom: (a, b) => a.nom.localeCompare(b.nom, 'fr'),
+    temps: (a, b) => (a.tempsPreparation + a.tempsCuisson) - (b.tempsPreparation + b.tempsCuisson),
+    modifie: (a, b) => String(b.modifieLe).localeCompare(String(a.modifieLe))
+  }[tri] || ((a, b) => String(b.modifieLe).localeCompare(String(a.modifieLe)));
+  return liste.sort(cmp);
+}
+
+/* Toutes les étiquettes utilisées, triées pour les puces de filtre. */
+function toutesEtiquettes() {
+  const set = new Set();
+  for (const r of donnees.recettes) for (const e of r.etiquettes) set.add(e);
+  return [...set].sort((a, b) => a.localeCompare(b, 'fr'));
 }
 
 /* ------------------------------------------------------------
@@ -232,6 +387,23 @@ function recettesFiltrees() {
 
 function cleCourse(nom, unite) {
   return normaliserTexte(nom) + '|' + uniteBase(unite);
+}
+
+/* Rayons de magasin : le premier motif trouvé dans le nom de l'article gagne. */
+const RAYONS = [
+  ['Fruits et légumes', /pomme|poire|banane|orange|citron|fraise|framboise|myrtille|raisin|pêche|abricot|prune|cerise|melon|pastèque|carotte|oignon|ail|échalote|tomate|salade|laitue|épinard|poireau|courgette|poivron|aubergine|concombre|champignon|avocat|haricot|petit pois|maïs|céleri|navet|radis|betterave|chou|fenouil|potiron|courge|patate|pomme de terre|asperge|artichaut|fruit|légume|herbe|persil|basilic|menthe|coriandre|ciboulette/i],
+  ['Boulangerie et céréales', /farine|pain|baguette|pâte|pâtes|riz|semoule|quinoa|avoine|céréale|levure|couscous|polenta|nouille|spaghetti|penne|macaroni|lasagne|tagliatelle|brioche|croissant|blé|sarrasin|millet/i],
+  ['Crèmerie et œufs', /lait|crème|beurre|fromage|yaourt|yogourt|œuf|oeuf|mascarpone|mozzarella|parmesan|gruyère|emmental|chèvre|chantilly/i],
+  ['Viandes et poissons', /poulet|bœuf|boeuf|porc|veau|agneau|mouton|jambon|lardon|saucisse|steak|haché|escalope|dinde|canard|thon|saumon|cabillaud|merlu|maquereau|sardine|anchois|crevette|moule|poisson|viande|magret|rillettes/i],
+  ['Épicerie salée', /huile|vinaigre|sel|poivre|moutarde|ketchup|mayonnaise|sauce|épice|curry|paprika|cannelle|thym|laurier|romarin|concentré|cube|conserve|lentille|pois chiche|olive|câpre|cornichon|soja|nuoc mam/i],
+  ['Épicerie sucrée', /sucre|miel|confiture|chocolat|vanille|cacao|pâte à tartiner|sirop|mélasse|cassonade|glace en poudre/i],
+  ['Boissons', /eau|jus|vin|bière|cidre|soda|café|thé|tisane|limonade|boisson/i],
+  ['Surgelés', /surgelé|sorbet/i],
+  ['Hygiène et entretien', /sopalin|papier toilette|essuie-tout|éponge|lessive|savon|shampoing|dentifrice|sac poubelle|aluminium|film étirable|papier cuisson|bicarbonate/i]
+];
+function rayonDe(nom) {
+  for (const [label, motif] of RAYONS) if (motif.test(nom)) return label;
+  return 'Autres';
 }
 
 /* Ajoute une quantité à la liste de courses (fusion si l'ingrédient existe déjà). */
@@ -246,9 +418,18 @@ function ajouterAListe(nom, quantite, unite) {
     existant.quantite = n.q;
     existant.unite = n.unite;
   } else {
-    donnees.courses.push({ id: uid(), nom: nom.trim(), quantite: qBase, unite: baseU, coche: false });
+    donnees.courses.push({ id: uid(), nom: nom.trim(), quantite: qBase, unite: baseU, coche: false, recurrente: false });
   }
   sauvegarder();
+}
+
+/* Ajoute un article manuel (sans quantité) à la liste de courses. */
+function ajouterArticleManuel(nom) {
+  nom = String(nom || '').trim();
+  if (!nom) return;
+  donnees.courses.push({ id: uid(), nom, quantite: 0, unite: 'pièce', coche: false, recurrente: false });
+  sauvegarder();
+  toast('« ' + nom + ' » ajouté à la liste');
 }
 
 /* Ajoute tous les ingrédients d'une recette (quantités ajustées aux parts affichées). */
@@ -265,13 +446,22 @@ function coursesAgregees() {
   const groupes = new Map();
   for (const item of donnees.courses) {
     const cle = cleCourse(item.nom, item.unite);
-    if (!groupes.has(cle)) groupes.set(cle, { nom: item.nom, unite: uniteBase(item.unite), quantite: 0, coche: true, ids: [] });
+    if (!groupes.has(cle)) groupes.set(cle, { nom: item.nom, unite: uniteBase(item.unite), quantite: 0, coche: true, recurrente: false, ids: [] });
     const g = groupes.get(cle);
     g.quantite = arrondirSelonUnite(g.quantite + versBase(item.quantite, item.unite), g.unite);
     g.coche = g.coche && item.coche;
+    g.recurrente = g.recurrente || !!item.recurrente;
     g.ids.push(item.id);
   }
-  return [...groupes.values()];
+  for (const g of groupes.values()) g.rayon = rayonDe(g.nom);
+  /* Tri par rayon (ordre du magasin), puis par nom. */
+  const ordre = RAYONS.map(([label]) => label);
+  ordre.push('Autres');
+  return [...groupes.values()].sort((a, b) => {
+    const ra = ordre.indexOf(a.rayon), rb = ordre.indexOf(b.rayon);
+    if (ra !== rb) return ra - rb;
+    return a.nom.localeCompare(b.nom, 'fr');
+  });
 }
 
 /* ------------------------------------------------------------
@@ -310,35 +500,146 @@ function rendreAccueil() {
   liste.textContent = '';
   const recettes = recettesFiltrees();
   document.getElementById('aucune-recette').hidden = recettes.length > 0;
+
+  /* Puces de filtre par étiquette. */
+  const barreEtiquettes = document.getElementById('filtres-etiquettes');
+  barreEtiquettes.textContent = '';
+  const etiquettes = toutesEtiquettes();
+  barreEtiquettes.hidden = etiquettes.length === 0;
+  if (etiquettes.length > 0) {
+    barreEtiquettes.append(el('button', {
+      class: 'puce-filtre' + (etiquetteActive === null ? ' active' : ''), type: 'button',
+      'aria-pressed': etiquetteActive === null ? 'true' : 'false',
+      onclick: () => { etiquetteActive = null; rendreAccueil(); }
+    }, 'Toutes'));
+    for (const e of etiquettes) {
+      const active = normaliserTexte(e) === normaliserTexte(etiquetteActive || '');
+      barreEtiquettes.append(el('button', {
+        class: 'puce-filtre' + (active ? ' active' : ''), type: 'button',
+        'aria-pressed': active ? 'true' : 'false',
+        onclick: () => { etiquetteActive = active ? null : e; rendreAccueil(); }
+      }, e));
+    }
+  }
+
   for (const r of recettes) {
     const puces = el('ul', { class: 'puces' },
       puceTexte('⏱', tempsTotal(r) + ' min'),
       puceTexte('👥', r.partsBase + (r.partsBase > 1 ? ' parts' : ' part')),
       puceTexte('🧺', r.ingredients.length + (r.ingredients.length > 1 ? ' ingrédients' : ' ingrédient'))
     );
-    if (r.temperature) puces.append(puceTexte('🌡', r.temperature + ' °C'));
+    if (r.temperature) puces.append(puceTexte('🌡', formaterTemperature(r.temperature) + temperatureSecondaire(r.temperature)));
+    if (r.etiquettes.length > 0) puces.append(el('li', { class: 'puce' }, '🏷 ', el('b', { text: r.etiquettes.join(', ') })));
     liste.append(el('article', { class: 'carte-recette' },
+      r.photo ? imageRecette(r, 'photo-carte') : null,
       el('h2', {}, el('a', { href: '#/recette/' + r.id, text: r.nom })),
       puces,
       el('div', { class: 'actions' },
         el('a', { class: 'bouton-secondaire', href: '#/recette/' + r.id }, 'Ouvrir'),
         el('a', { class: 'bouton-secondaire', href: '#/recette/' + r.id + '/modifier' }, 'Modifier'),
+        el('button', { class: 'bouton-secondaire', type: 'button', onclick: () => dupliquerRecette(r.id) }, 'Dupliquer'),
         el('button', { class: 'bouton-danger', type: 'button', onclick: () => supprimerRecette(r.id) }, 'Supprimer')
       )
     ));
   }
   document.getElementById('recherche').value = rechercheTexte;
   document.getElementById('filtre-temps').value = filtreTemps;
+  document.getElementById('tri').value = donnees.reglages.tri || 'modifie';
 }
 
-function supprimerRecette(id) {
+/* Texte complet d'une recette (pour partage / copie / impression). */
+function recetteEnTexte(r) {
+  const lignes = [r.nom];
+  const infos = ['Parts : ' + r.partsBase];
+  if (r.tempsPreparation) infos.push('prépa ' + r.tempsPreparation + ' min');
+  if (r.tempsCuisson) infos.push('cuisson ' + r.tempsCuisson + ' min');
+  lignes.push(infos.join(' — '));
+  if (r.temperature) {
+    lignes.push('Four : ' + formaterTemperature(r.temperature) + temperatureSecondaire(r.temperature) +
+      ' (' + (r.modeFour === 'tournante' ? 'chaleur tournante' : 'traditionnel') + ')');
+  }
+  if (r.etiquettes.length > 0) lignes.push('Étiquettes : ' + r.etiquettes.join(', '));
+  lignes.push('', 'Ingrédients (pour ' + r.partsBase + (r.partsBase > 1 ? ' parts' : ' part') + ') :');
+  for (const ing of r.ingredients) {
+    lignes.push('• ' + formaterQuantite(ing.quantite, ing.unite) + ' ' + ing.nom + (ing.fixe ? ' (qte fixe)' : ''));
+  }
+  const etapes = r.instructions.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+  if (etapes.length > 0) {
+    lignes.push('', 'Instructions :');
+    etapes.forEach((e, i) => lignes.push((i + 1) + '. ' + e));
+  }
+  return lignes.join('\n');
+}
+
+/* Partage natif si disponible, sinon copie dans le presse-papiers. */
+async function partagerRecette(r) {
+  const texte = recetteEnTexte(r);
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: r.nom + ' — Omni-Cooking', text: texte });
+      return;
+    } catch (e) {
+      if (e && e.name === 'AbortError') return; // partage annulé par l'utilisateur
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(texte);
+    toast('Recette copiée dans le presse-papiers');
+  } catch (e) {
+    toast('Partage indisponible : ouvrez la recette et copiez son texte.');
+  }
+}
+
+/* Duplique une recette (nouveaux identifiants, nom suffixé « (copie) »), photo comprise. */
+async function dupliquerRecette(id) {
   const r = donnees.recettes.find((x) => x.id === id);
   if (!r) return;
-  if (!window.confirm('Supprimer définitivement la recette « ' + r.nom + ' » ?')) return;
-  donnees.recettes = donnees.recettes.filter((x) => x.id !== id);
+  const copie = normaliserRecette(JSON.parse(JSON.stringify({
+    ...r,
+    id: uid(),
+    nom: r.nom + ' (copie)',
+    creeLe: new Date().toISOString(),
+    modifieLe: new Date().toISOString()
+  })));
+  copie.ingredients = copie.ingredients.map((i) => ({ ...i, id: uid() }));
+  if (r.photo && typeof indexedDB !== 'undefined') {
+    try {
+      const blob = await bdGet('photos', r.id);
+      if (blob) await bdPut('photos', copie.id, blob);
+    } catch (e) { copie.photo = false; }
+  }
+  donnees.recettes.push(copie);
   sauvegarder();
-  toast('Recette « ' + r.nom + ' » supprimée');
-  location.hash = '#/';
+  toast('Recette dupliquée : « ' + copie.nom + ' »');
+  location.hash = '#/recette/' + copie.id;
+}
+
+/* Suppression avec annulation possible pendant 6 secondes. */
+let derniereSuppression = null; // { recette, index, timer }
+
+function supprimerRecette(id) {
+  const index = donnees.recettes.findIndex((x) => x.id === id);
+  if (index === -1) return;
+  const r = donnees.recettes[index];
+  donnees.recettes.splice(index, 1);
+  sauvegarder();
+  if (derniereSuppression) clearTimeout(derniereSuppression.timer);
+  derniereSuppression = { recette: r, index, timer: null };
+  toast('Recette « ' + r.nom + ' » supprimée', { label: 'Annuler', action: annulerSuppression });
+  derniereSuppression.timer = setTimeout(() => { derniereSuppression = null; }, 6000);
+  if (location.hash.indexOf('#/recette/' + id) === 0) location.hash = '#/';
+  else router();
+}
+
+function annulerSuppression() {
+  if (!derniereSuppression) return;
+  clearTimeout(derniereSuppression.timer);
+  const { recette, index } = derniereSuppression;
+  donnees.recettes.splice(Math.min(index, donnees.recettes.length), 0, recette);
+  derniereSuppression = null;
+  sauvegarder();
+  toast('Suppression annulée : « ' + recette.nom + ' » restaurée');
+  router();
 }
 
 /* ---------- Fiche d'une recette ---------- */
@@ -355,7 +656,8 @@ function rendreFiche(id) {
   puces.append(puceTexte('👥', r.partsActuelles + ' / ' + r.partsBase + (r.partsBase > 1 ? ' parts' : ' part')));
   if (r.tempsPreparation) puces.append(puceTexte('⏱', 'prépa ' + r.tempsPreparation + ' min'));
   if (r.tempsCuisson) puces.append(puceTexte('🔥', 'cuisson ' + r.tempsCuisson + ' min'));
-  if (r.temperature) puces.append(puceTexte('🌡', r.temperature + ' °C — ' + (r.modeFour === 'tournante' ? 'chaleur tournante' : 'four traditionnel')));
+  if (r.temperature) puces.append(puceTexte('🌡', formaterTemperature(r.temperature) + temperatureSecondaire(r.temperature) + ' — ' + (r.modeFour === 'tournante' ? 'chaleur tournante' : 'four traditionnel')));
+  if (r.etiquettes.length > 0) puces.append(el('li', { class: 'puce' }, '🏷 ', el('b', { text: r.etiquettes.join(', ') })));
 
   /* Sélecteur de parts : les quantités se recalculent automatiquement. */
   const champParts = el('input', {
@@ -374,7 +676,7 @@ function rendreFiche(id) {
   for (const ing of r.ingredients) {
     const q = quantiteMiseAJour(ing, r.partsActuelles, r.partsBase);
     listeIng.append(el('li', {},
-      el('span', { class: 'nom', text: ing.nom }),
+      el('span', { class: 'nom' }, ing.nom, ing.fixe ? el('span', { class: 'badge-fixe', text: 'qte fixe' }) : null),
       el('span', { class: 'qte', text: formaterQuantite(q.q, q.unite) }),
       el('button', {
         class: 'bouton-secondaire ajouter-courses', type: 'button',
@@ -391,7 +693,8 @@ function rendreFiche(id) {
     el('a', { href: '#/', class: 'discret' }, '← Toutes les recettes'),
     el('div', { class: 'fiche-entete' },
       el('h1', { id: 'titre-fiche', text: r.nom }),
-      puces
+      puces,
+      r.photo ? imageRecette(r, 'photo-recette') : null
     ),
     el('div', { class: 'selecteur-parts' },
       el('strong', { text: 'Parts :' }),
@@ -423,6 +726,9 @@ function rendreFiche(id) {
     ) : null,
     el('div', { class: 'actions-ligne' },
       el('a', { class: 'bouton', href: '#/recette/' + r.id + '/modifier' }, 'Modifier'),
+      el('button', { class: 'bouton-secondaire', type: 'button', onclick: () => dupliquerRecette(r.id) }, 'Dupliquer'),
+      el('button', { class: 'bouton-secondaire', type: 'button', onclick: () => partagerRecette(r) }, '↗ Partager'),
+      el('button', { class: 'bouton-secondaire', type: 'button', onclick: () => window.print() }, '🖨 Imprimer'),
       el('button', { class: 'bouton', type: 'button', onclick: () => ouvrirModeCuisson(r.id) }, '🔥 Mode cuisson'),
       el('button', { class: 'bouton-danger', type: 'button', onclick: () => supprimerRecette(r.id) }, 'Supprimer')
     )
@@ -439,15 +745,48 @@ function rendreFormulaire(id) {
 
   /* Champs principaux. */
   const champNom = el('input', { type: 'text', id: 'f-nom', required: 'true', maxlength: '120', placeholder: 'Ex. : Tarte aux pommes', value: existant ? existant.nom : '' });
+  const champEtiquettes = el('input', { type: 'text', id: 'f-etiquettes', maxlength: '200', placeholder: 'Ex. : dessert, rapide, végétarien', value: existant ? existant.etiquettes.join(', ') : '' });
   const champParts = el('input', { type: 'number', id: 'f-parts', min: '1', max: '999', step: '1', required: 'true', value: existant ? existant.partsBase : 4 });
   const champPrepa = el('input', { type: 'number', id: 'f-prepa', min: '0', max: '9999', step: '1', value: existant ? existant.tempsPreparation : 0 });
   const champCuisson = el('input', { type: 'number', id: 'f-cuisson', min: '0', max: '9999', step: '1', value: existant ? existant.tempsCuisson : 0 });
-  const champTemp = el('input', { type: 'number', id: 'f-temp', min: '0', max: '300', step: '5', placeholder: 'ex. : 180', value: existant && existant.temperature !== null ? existant.temperature : '' });
+  const champTemp = el('input', {
+    type: 'number', id: 'f-temp',
+    min: uniteTemp() === 'F' ? '32' : '0', max: uniteTemp() === 'F' ? '600' : '300', step: uniteTemp() === 'F' ? '10' : '5',
+    placeholder: uniteTemp() === 'F' ? 'ex. : 350' : 'ex. : 180',
+    value: existant && existant.temperature !== null ? (uniteTemp() === 'F' ? cVersF(existant.temperature) : existant.temperature) : ''
+  });
   const champMode = el('select', { id: 'f-mode' },
     el('option', { value: 'traditionnel', selected: !existant || existant.modeFour !== 'tournante' ? 'true' : null }, 'Four traditionnel'),
     el('option', { value: 'tournante', selected: existant && existant.modeFour === 'tournante' ? 'true' : null }, 'Chaleur tournante')
   );
   const champInstructions = el('textarea', { id: 'f-instructions', placeholder: 'Une étape par ligne…' }, existant ? existant.instructions : '');
+
+  /* Photo du plat : sélection, aperçu, suppression (stockée compressée dans IndexedDB). */
+  const champPhoto = el('input', { type: 'file', id: 'f-photo', accept: 'image/*', 'aria-label': 'Photo du plat' });
+  const apercu = el('img', { class: 'apercu-photo', alt: 'Aperçu de la photo', hidden: 'true' });
+  const boutonSupprPhoto = el('button', { class: 'bouton-secondaire', type: 'button', hidden: 'true', onclick: () => {
+    form._photoFile = null;
+    form._photoSupprimee = true;
+    champPhoto.value = '';
+    apercu.hidden = true;
+    apercu.removeAttribute('src');
+    boutonSupprPhoto.hidden = true;
+  } }, 'Supprimer la photo');
+  champPhoto.addEventListener('change', () => {
+    const fichier = champPhoto.files && champPhoto.files[0];
+    form._photoFile = fichier || null;
+    form._photoSupprimee = false;
+    if (fichier) {
+      apercu.src = URL.createObjectURL(fichier);
+      apercu.hidden = false;
+      boutonSupprPhoto.hidden = false;
+    }
+  });
+  if (existant && existant.photo && typeof indexedDB !== 'undefined') {
+    bdGet('photos', existant.id).then((blob) => {
+      if (blob) { apercu.src = URL.createObjectURL(blob); apercu.hidden = false; boutonSupprPhoto.hidden = false; }
+    }).catch(() => {});
+  }
 
   /* Lignes d'ingrédients dynamiques. */
   const blocLignes = el('div', { class: 'ingredients-form', id: 'f-ingredients' });
@@ -457,12 +796,17 @@ function rendreFormulaire(id) {
     const champUnite = el('select', { class: 'unite', 'aria-label': 'Unité' },
       UNITES.map((u) => el('option', { value: u, selected: ing && ing.unite === u ? 'true' : null }, u))
     );
+    const caseFixe = el('input', {
+      type: 'checkbox', class: 'case-fixe',
+      'aria-label': 'Quantité fixe (non mise à l\'échelle avec les parts)', title: 'Quantité fixe : non mise à l\'échelle avec les parts',
+      checked: ing && ing.fixe ? 'true' : null
+    });
     const boutonSuppr = el('button', {
       class: 'bouton-icone', type: 'button', 'aria-label': 'Retirer cet ingrédient', title: 'Retirer',
       onclick: () => ligne.remove()
     }, '✕');
-    const ligne = el('div', { class: 'ligne-ingredient' }, champIngNom, champQte, champUnite, boutonSuppr);
-    ligne._champs = { nom: champIngNom, qte: champQte, unite: champUnite };
+    const ligne = el('div', { class: 'ligne-ingredient' }, champIngNom, champQte, champUnite, caseFixe, boutonSuppr);
+    ligne._champs = { nom: champIngNom, qte: champQte, unite: champUnite, fixe: caseFixe };
     return ligne;
   }
   (existant ? existant.ingredients : [{ nom: '', quantite: '', unite: 'g' }]).forEach((ing) => blocLignes.append(ligneIngredient(ing)));
@@ -475,13 +819,14 @@ function rendreFormulaire(id) {
     }
   },
     el('div', { class: 'champ' }, el('label', { for: 'f-nom', text: 'Nom de la recette *' }), champNom),
+    el('div', { class: 'champ' }, el('label', { for: 'f-etiquettes', text: 'Étiquettes (séparées par des virgules)' }), champEtiquettes),
     el('div', { class: 'ligne-champs' },
       el('div', { class: 'champ' }, el('label', { for: 'f-parts', text: 'Parts de base *' }), champParts),
       el('div', { class: 'champ' }, el('label', { for: 'f-prepa', text: 'Préparation (min)' }), champPrepa),
       el('div', { class: 'champ' }, el('label', { for: 'f-cuisson', text: 'Cuisson (min)' }), champCuisson)
     ),
     el('div', { class: 'ligne-champs' },
-      el('div', { class: 'champ' }, el('label', { for: 'f-temp', text: 'Température (°C)' }), champTemp),
+      el('div', { class: 'champ' }, el('label', { for: 'f-temp', id: 'label-temp', text: 'Température du four (' + (uniteTemp() === 'F' ? '°F' : '°C') + ')' }), champTemp),
       el('div', { class: 'champ' },
         el('label', { for: 'f-mode', text: 'Mode du four' }), champMode,
         el('p', { class: 'indice', text: 'En chaleur tournante, réglez en général 20 °C de moins qu\'en traditionnel.' })
@@ -498,26 +843,37 @@ function rendreFormulaire(id) {
     el('div', { class: 'champ' },
       el('label', { for: 'f-instructions', text: 'Instructions / notes (une étape par ligne)' }), champInstructions
     ),
+    el('fieldset', { class: 'groupe' },
+      el('legend', { text: 'Photo du plat (optionnel)' }),
+      el('p', { class: 'indice', text: 'L\'image est compressée sur l\'appareil (JPEG, max 1200 px) et stockée localement, jamais envoyée en ligne.' }),
+      el('div', { class: 'photo-form' }, champPhoto, apercu, boutonSupprPhoto)
+    ),
     el('div', { class: 'form-actions' },
       el('button', { class: 'bouton', type: 'submit', text: existant ? 'Enregistrer les modifications' : 'Créer la recette' }),
       el('a', { class: 'bouton-secondaire', href: existant ? '#/recette/' + existant.id : '#/', text: 'Annuler' })
     )
   );
   formulaire._blocLignes = blocLignes;
+  formulaire._photoFile = null;
+  formulaire._photoSupprimee = false;
   conteneur.append(formulaire);
   champNom.focus();
 }
 
-/* Enregistrement du formulaire (création ou modification). */
-function enregistrerRecette(form, existant) {
+/* Enregistrement du formulaire (création ou modification), avec la photo éventuelle. */
+async function enregistrerRecette(form, existant) {
   const nom = form.querySelector('#f-nom').value.trim();
   if (!nom) { toast(' Donnez un nom à la recette.'); form.querySelector('#f-nom').focus(); return; }
   const partsBase = Math.max(1, parseInt(form.querySelector('#f-parts').value, 10) || 1);
   const ingredients = [...form._blocLignes.children].map((ligne) => ({
     nom: ligne._champs.nom.value.trim(),
     quantite: parseFloat(String(ligne._champs.qte.value).replace(',', '.')) || 0,
-    unite: ligne._champs.unite.value
+    unite: ligne._champs.unite.value,
+    fixe: ligne._champs.fixe.checked
   })).filter((i) => i.nom && i.quantite > 0);
+  const etiquettes = [...new Set(
+    form.querySelector('#f-etiquettes').value.split(/[,;]/).map((s) => s.trim()).filter(Boolean)
+  )].slice(0, 12);
   const tempBrute = form.querySelector('#f-temp').value;
   const recette = {
     id: existant ? existant.id : uid(),
@@ -526,13 +882,31 @@ function enregistrerRecette(form, existant) {
     partsActuelles: existant ? existant.partsActuelles : partsBase,
     tempsPreparation: Math.max(0, parseInt(form.querySelector('#f-prepa').value, 10) || 0),
     tempsCuisson: Math.max(0, parseInt(form.querySelector('#f-cuisson').value, 10) || 0),
-    temperature: tempBrute === '' ? null : Math.round(Number(tempBrute)),
+    /* La température est toujours stockée en °C, même si le formulaire affiche des °F. */
+    temperature: tempBrute === '' ? null : (uniteTemp() === 'F' ? fVersC(Number(tempBrute)) : Math.round(Number(tempBrute))),
     modeFour: form.querySelector('#f-mode').value,
+    etiquettes,
+    photo: existant ? !!existant.photo : false,
     ingredients: ingredients.map((i) => ({ id: uid(), ...i })),
     instructions: form.querySelector('#f-instructions').value.trim(),
     creeLe: existant ? existant.creeLe : new Date().toISOString(),
     modifieLe: new Date().toISOString()
   };
+  /* Photo : compressée puis stockée dans IndexedDB, ou supprimée. */
+  if (form._photoFile) {
+    try {
+      const blob = await compresserImage(form._photoFile);
+      if (typeof indexedDB !== 'undefined') await bdPut('photos', recette.id, blob);
+      recette.photo = true;
+    } catch (e) {
+      console.error('Omni-Cooking : photo non enregistrée', e);
+      recette.photo = existant ? !!existant.photo : false;
+      toast('Photo non enregistrée (image illisible ?)');
+    }
+  } else if (form._photoSupprimee) {
+    try { if (typeof indexedDB !== 'undefined') await bdDel('photos', recette.id); } catch (e) { /* tant pis */ }
+    recette.photo = false;
+  }
   if (existant) {
     donnees.recettes = donnees.recettes.map((r) => (r.id === recette.id ? recette : r));
   } else {
@@ -549,62 +923,163 @@ function rendreCourses() {
   conteneur.textContent = '';
   const groupes = coursesAgregees();
   if (groupes.length === 0) {
-    conteneur.append(el('p', { class: 'discret', text: 'La liste est vide. Ouvrez une recette et touchez « ＋ Courses » à côté d\'un ingrédient, ou « Tout ajouter ».' }));
+    conteneur.append(el('p', { class: 'discret', text: 'La liste est vide. Ouvrez une recette et touchez « ＋ Courses » à côté d\'un ingrédient, « Tout ajouter », ou ajoutez un article ci-dessus.' }));
     return;
   }
-  const liste = el('ul', { class: 'liste-courses' });
+  /* Regroupement par rayon de magasin. */
+  const parRayon = new Map();
   for (const g of groupes) {
-    const q = normaliserAffichage(g.quantite, g.unite);
-    const coche = el('input', {
-      type: 'checkbox', checked: g.coche ? 'true' : null,
-      'aria-label': 'Cocher ' + g.nom,
-      onchange: (e) => {
-        for (const id of g.ids) {
-          const item = donnees.courses.find((c) => c.id === id);
-          if (item) item.coche = e.target.checked;
+    if (!parRayon.has(g.rayon)) parRayon.set(g.rayon, []);
+    parRayon.get(g.rayon).push(g);
+  }
+  for (const [rayon, listeG] of parRayon) {
+    const liste = el('ul', { class: 'liste-courses', 'aria-label': rayon });
+    for (const g of listeG) {
+      const q = normaliserAffichage(g.quantite, g.unite);
+      const coche = el('input', {
+        type: 'checkbox', checked: g.coche ? 'true' : null,
+        'aria-label': 'Cocher ' + g.nom,
+        onchange: (e) => {
+          for (const id of g.ids) {
+            const item = donnees.courses.find((c) => c.id === id);
+            if (item) item.coche = e.target.checked;
+          }
+          sauvegarder();
+          rendreCourses();
         }
-        sauvegarder();
-        rendreCourses();
-      }
-    });
-    liste.append(el('li', { class: g.coche ? 'coche' : '' },
-      coche,
-      el('span', { class: 'article' }, el('span', { class: 'qte', text: formaterQuantite(q.q, q.unite) }), g.nom),
-      el('button', {
-        class: 'bouton-petit', type: 'button', 'aria-label': 'Retirer ' + g.nom + ' de la liste', title: 'Retirer',
-        onclick: () => {
-          donnees.courses = donnees.courses.filter((c) => !g.ids.includes(c.id));
-          sauvegarder(); rendreCourses(); toast(g.nom + ' retiré de la liste');
-        }
-      }, '✕')
+      });
+      liste.append(el('li', { class: g.coche ? 'coche' : '' },
+        coche,
+        el('span', { class: 'article' },
+          g.quantite > 0 ? el('span', { class: 'qte', text: formaterQuantite(q.q, q.unite) }) : null,
+          g.nom
+        ),
+        el('button', {
+          class: 'bouton-petit bouton-etoile', type: 'button',
+          'aria-pressed': g.recurrente ? 'true' : 'false',
+          'aria-label': (g.recurrente ? 'Retirer ' : 'Marquer ') + g.nom + (g.recurrente ? '' : ' comme article récurrent (toujours à acheter)'),
+          title: 'Article récurrent (toujours à acheter)',
+          onclick: () => {
+            for (const id of g.ids) {
+              const item = donnees.courses.find((c) => c.id === id);
+              if (item) item.recurrente = !g.recurrente;
+            }
+            sauvegarder(); rendreCourses();
+            toast(g.recurrente ? '« ' + g.nom + ' » n\'est plus récurrent' : '« ' + g.nom + ' » sera toujours proposé');
+          }
+        }, g.recurrente ? '★' : '☆'),
+        el('button', {
+          class: 'bouton-petit', type: 'button', 'aria-label': 'Retirer ' + g.nom + ' de la liste', title: 'Retirer',
+          onclick: () => {
+            donnees.courses = donnees.courses.filter((c) => !g.ids.includes(c.id));
+            sauvegarder(); rendreCourses(); toast(g.nom + ' retiré de la liste');
+          }
+        }, '✕')
+      ));
+    }
+    conteneur.append(el('section', { class: 'rayon', 'aria-labelledby': 'rayon-' + normaliserTexte(rayon) },
+      el('h2', { class: 'rayon-titre', id: 'rayon-' + normaliserTexte(rayon), text: rayon }),
+      liste
     ));
   }
-  conteneur.append(liste);
 }
 
 /* ------------------------------------------------------------
-   7. Mode cuisson plein écran + minuteur
+   7. Mode cuisson plein écran + minuteurs (plusieurs simultanés,
+      dont un minuteur facultatif par étape)
    ------------------------------------------------------------ */
 
 let recetteEnCuisson = null;
-let minuteur = { actif: false, finAt: 0, restantMs: 0, intervalle: null };
 let wakeLock = null;
+
+/* Moteur de minuteurs : plusieurs minuteurs peuvent tourner en même temps. */
+const minuteurs = new Map(); // id -> { id, label, dureeMs, finAt, restantMs, actif, affichage, ligne, bouton }
+let tickGlobal = null;
+
+function assurerTick() {
+  if (!tickGlobal) tickGlobal = setInterval(tickMinuteurs, 200);
+}
+
+function tickMinuteurs() {
+  let encoreActif = false;
+  for (const m of minuteurs.values()) {
+    if (!m.actif) continue;
+    const restant = m.finAt - Date.now();
+    if (restant <= 0) {
+      m.restantMs = 0;
+      m.actif = false;
+      if (m.affichage) { m.affichage.textContent = '00:00'; m.affichage.classList.add('termine'); }
+      if (m.ligne) m.ligne.classList.add('termine');
+      if (m.bouton) m.bouton.textContent = m.ligne ? '⏱' : '▶ Démarrer';
+      signalerFin();
+    } else {
+      encoreActif = true;
+      if (m.affichage) m.affichage.textContent = formaterDuree(restant);
+    }
+  }
+  if (!encoreActif) { clearInterval(tickGlobal); tickGlobal = null; }
+}
+
+function ajouterMinuteur(label, dureeMs) {
+  const id = uid();
+  minuteurs.set(id, { id, label, dureeMs, finAt: 0, restantMs: dureeMs, actif: false, affichage: null, ligne: null, bouton: null });
+  return id;
+}
+
+function basculerMinuteur(id) {
+  const m = minuteurs.get(id);
+  if (!m) return;
+  if (m.actif) {
+    m.restantMs = Math.max(0, m.finAt - Date.now());
+    m.actif = false;
+  } else {
+    const duree = m.restantMs > 0 ? m.restantMs : m.dureeMs;
+    m.finAt = Date.now() + duree;
+    m.restantMs = duree;
+    m.actif = true;
+    assurerTick();
+  }
+  if (recetteEnCuisson) rendreMinuteursCuisson();
+}
+
+function reinitialiserMinuteur(id) {
+  const m = minuteurs.get(id);
+  if (!m) return;
+  m.actif = false;
+  m.restantMs = m.dureeMs;
+  m.finAt = 0;
+  if (recetteEnCuisson) rendreMinuteursCuisson();
+}
+
+function supprimerMinuteur(id) {
+  minuteurs.delete(id);
+  if (recetteEnCuisson) rendreMinuteursCuisson();
+}
+
+function arreterTousLesMinuteurs() {
+  for (const m of minuteurs.values()) m.actif = false;
+  minuteurs.clear();
+  if (tickGlobal) { clearInterval(tickGlobal); tickGlobal = null; }
+}
 
 function ouvrirModeCuisson(id) {
   const r = donnees.recettes.find((x) => x.id === id);
   if (!r) return;
   recetteEnCuisson = r;
+  arreterTousLesMinuteurs();
+  /* Minuteur principal pré-rempli avec le temps de cuisson de la recette. */
+  ajouterMinuteur('Cuisson', (r.tempsCuisson || 30) * 60000);
   rendreModeCuisson();
   const overlay = document.getElementById('mode-cuisson');
   overlay.hidden = false;
   document.body.style.overflow = 'hidden';
   const p = overlay.requestFullscreen ? overlay.requestFullscreen() : null;
-  if (p && p.catch) p.catch(() => {}); // le plein écran peut être refusé : l'overlay reste plein écran via CSS
+  if (p && p.catch) p.catch(() => {}); // plein écran refusé : l'overlay reste plein écran via CSS
   demanderVigilance();
 }
 
 function fermerModeCuisson() {
-  arreterMinuteur();
+  arreterTousLesMinuteurs();
   recetteEnCuisson = null;
   document.getElementById('mode-cuisson').hidden = true;
   document.body.style.overflow = '';
@@ -626,28 +1101,12 @@ function rendreModeCuisson() {
   if (!r) return;
 
   const thermo = r.temperature
-    ? el('div', { class: 'thermo' }, r.temperature + ' °C',
+    ? el('div', { class: 'thermo' },
+        formaterTemperature(r.temperature) + temperatureSecondaire(r.temperature),
         el('small', { text: r.modeFour === 'tournante' ? 'chaleur tournante' : 'four traditionnel' }))
     : el('div', { class: 'thermo' }, '—', el('small', { text: 'cuisson à la poêle / sans four' }));
 
-  const champMinutes = el('input', {
-    type: 'number', min: '1', max: '999', step: '1', value: r.tempsCuisson || 30,
-    'aria-label': 'Durée du minuteur en minutes'
-  });
-  const affichageTemps = el('div', { class: 'temps', id: 'cuisson-temps', role: 'timer', 'aria-live': 'off' }, formaterDuree((parseInt(champMinutes.value, 10) || 30) * 60000));
-  const boutonMarche = el('button', {
-    class: 'bouton', type: 'button', id: 'cuisson-marche', text: 'Démarrer',
-    onclick: () => basculerMinuteur(champMinutes, affichageTemps, boutonMarche)
-  });
-
   const etapes = r.instructions.split(/\n+/).map((s) => s.trim()).filter(Boolean);
-  const listeEtapes = el('ol', { class: 'etapes-cuisson' },
-    etapes.length > 0 ? etapes.map((e) => el('li', {
-      text: e, tabindex: '0',
-      onclick: (ev) => ev.currentTarget.classList.toggle('faite'),
-      onkeydown: (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.currentTarget.classList.toggle('faite'); } }
-    })) : el('li', { text: 'Aucune instruction enregistrée pour cette recette.' })
-  );
 
   conteneur.append(el('div', { class: 'cuisson' },
     el('div', { class: 'entete-cuisson' },
@@ -656,24 +1115,114 @@ function rendreModeCuisson() {
     ),
     el('div', { class: 'cuisson-visuel' },
       thermo,
-      el('div', { class: 'minuteur' },
-        affichageTemps,
-        el('div', { class: 'reglage-temps' }, el('label', { for: champMinutes.id || 'cuisson-duree', text: 'Minuteur (min) :' }), champMinutes),
-        el('div', { class: 'controles' },
-          boutonMarche,
-          el('button', {
-            class: 'bouton-secondaire', type: 'button',
-            onclick: () => { reinitialiserMinuteur(champMinutes, affichageTemps, boutonMarche); }
-          }, 'Réinitialiser')
-        )
+      el('div', { class: 'minuteurs-groupe' },
+        el('div', { class: 'bloc-minuteurs', id: 'cuisson-minuteurs' }),
+        el('button', {
+          class: 'bouton-secondaire', type: 'button',
+          onclick: () => { ajouterMinuteur('Minuteur ' + (minuteurs.size + 1), 5 * 60000); rendreMinuteursCuisson(); }
+        }, '＋ Ajouter un minuteur')
       )
     ),
     etapes.length > 0 ? el('section', { 'aria-labelledby': 'cuisson-etapes-titre' },
-      el('h2', { id: 'cuisson-etapes-titre', text: 'Étapes (touchez une étape pour la valider)' }),
-      listeEtapes
+      el('h2', { id: 'cuisson-etapes-titre', text: 'Étapes (touchez une étape pour la valider ; ⏱ lance un minuteur sur l\'étape)' }),
+      el('ol', { class: 'etapes-cuisson', id: 'cuisson-etapes' }, etapes.map((texteEtape, i) => rendreEtapeCuisson(texteEtape, i)))
     ) : null
   ));
-  champMinutes.id = 'cuisson-duree';
+  rendreMinuteursCuisson();
+}
+
+/* Liste des minuteurs globaux (un par ligne, gérable individuellement). */
+function rendreMinuteursCuisson() {
+  const bloc = document.getElementById('cuisson-minuteurs');
+  if (!bloc) return;
+  bloc.textContent = '';
+  for (const m of minuteurs.values()) {
+    const champLabel = el('input', {
+      type: 'text', class: 'min-label', value: m.label, maxlength: '40', 'aria-label': 'Nom du minuteur',
+      onchange: (e) => { m.label = e.target.value.trim() || m.label; }
+    });
+    const champMin = el('input', {
+      type: 'number', min: '1', max: '999', step: '1', class: 'min-duree',
+      value: Math.round(m.dureeMs / 60000), 'aria-label': 'Durée du minuteur en minutes',
+      onchange: (e) => {
+        m.dureeMs = Math.max(1, parseInt(e.target.value, 10) || 1) * 60000;
+        if (!m.actif) {
+          m.restantMs = m.dureeMs;
+          if (m.affichage) m.affichage.textContent = formaterDuree(m.restantMs);
+        }
+      }
+    });
+    const affichage = el('span', { class: 'temps' + (m.restantMs === 0 && !m.actif ? ' termine' : ''), text: formaterDuree(m.restantMs) });
+    const bouton = el('button', {
+      class: 'bouton', type: 'button',
+      text: m.actif ? '⏸ Pause' : (m.restantMs > 0 && m.restantMs < m.dureeMs ? '▶ Reprendre' : '▶ Démarrer'),
+      onclick: () => basculerMinuteur(m.id)
+    });
+    m.affichage = affichage;
+    m.bouton = bouton;
+    bloc.append(el('div', { class: 'minuteur-ligne' + (m.restantMs === 0 && !m.actif ? ' termine' : '') },
+      champLabel,
+      champMin,
+      el('span', { class: 'min-unite', text: 'min' }),
+      affichage,
+      bouton,
+      el('button', { class: 'bouton-secondaire', type: 'button', onclick: () => reinitialiserMinuteur(m.id) }, 'Réinitialiser'),
+      el('button', { class: 'bouton-petit', type: 'button', 'aria-label': 'Supprimer ce minuteur', title: 'Supprimer', onclick: () => supprimerMinuteur(m.id) }, '✕')
+    ));
+  }
+}
+
+/* Une étape de la recette, avec son propre minuteur facultatif. */
+function rendreEtapeCuisson(texteEtape, index) {
+  const li = el('li', {
+    tabindex: '0',
+    onclick: (ev) => { if (ev.target.closest && ev.target.closest('.controles-etape')) return; ev.currentTarget.classList.toggle('faite'); },
+    onkeydown: (ev) => {
+      if ((ev.key === 'Enter' || ev.key === ' ') && !(ev.target.closest && ev.target.closest('.controles-etape'))) {
+        ev.preventDefault();
+        ev.currentTarget.classList.toggle('faite');
+      }
+    }
+  }, texteEtape);
+
+  const champMin = el('input', {
+    type: 'number', min: '1', max: '999', step: '1', value: '5', class: 'min-etape',
+    'aria-label': 'Minutes du minuteur de cette étape'
+  });
+  const affichage = el('span', { class: 'temps-etape', text: formaterDuree(5 * 60000) });
+  const bouton = el('button', {
+    class: 'bouton-petit', type: 'button', 'aria-label': 'Démarrer / mettre en pause le minuteur de cette étape', text: '⏱',
+    onclick: (ev) => {
+      ev.stopPropagation();
+      let id = li._minuteurId;
+      if (!id) {
+        id = ajouterMinuteur('Étape ' + (index + 1), Math.max(1, parseInt(champMin.value, 10) || 5) * 60000);
+        li._minuteurId = id;
+        const m = minuteurs.get(id);
+        m.ligne = li;
+        m.affichage = affichage;
+        m.bouton = bouton;
+      }
+      basculerMinuteur(id);
+      const m = minuteurs.get(id);
+      bouton.textContent = m.actif ? '⏸' : '⏱';
+    }
+  });
+  champMin.addEventListener('click', (ev) => ev.stopPropagation());
+  champMin.addEventListener('change', () => {
+    const duree = Math.max(1, parseInt(champMin.value, 10) || 5) * 60000;
+    const m = li._minuteurId ? minuteurs.get(li._minuteurId) : null;
+    if (m) {
+      m.dureeMs = duree;
+      if (!m.actif) { m.restantMs = duree; affichage.textContent = formaterDuree(duree); }
+    } else {
+      affichage.textContent = formaterDuree(duree);
+    }
+  });
+  affichage.addEventListener('click', (ev) => ev.stopPropagation());
+
+  li.append(el('span', { class: 'controles-etape' }, champMin, el('span', { class: 'min-unite', text: 'min' }), bouton, affichage));
+  return li;
 }
 
 function formaterDuree(ms) {
@@ -685,48 +1234,7 @@ function formaterDuree(ms) {
   return h > 0 ? h + ':' + deux(m) + ':' + deux(s) : deux(m) + ':' + deux(s);
 }
 
-function basculerMinuteur(champMinutes, affichageTemps, boutonMarche) {
-  if (minuteur.actif) {
-    minuteur.restantMs = Math.max(0, minuteur.finAt - Date.now());
-    arreterMinuteur();
-    boutonMarche.textContent = 'Reprendre';
-  } else {
-    const duree = minuteur.restantMs > 0 ? minuteur.restantMs : (parseInt(champMinutes.value, 10) || 1) * 60000;
-    minuteur.finAt = Date.now() + duree;
-    minuteur.restantMs = duree;
-    minuteur.actif = true;
-    boutonMarche.textContent = 'Pause';
-    minuteur.intervalle = setInterval(() => {
-      const restant = minuteur.finAt - Date.now();
-      if (restant <= 0) {
-        minuteur.restantMs = 0;
-        arreterMinuteur();
-        affichageTemps.textContent = '00:00';
-        affichageTemps.classList.add('termine');
-        boutonMarche.textContent = 'Démarrer';
-        signalerFin();
-      } else {
-        affichageTemps.textContent = formaterDuree(restant);
-      }
-    }, 200);
-  }
-  affichageTemps.textContent = formaterDuree(minuteur.restantMs);
-}
-
-function reinitialiserMinuteur(champMinutes, affichageTemps, boutonMarche) {
-  arreterMinuteur();
-  minuteur.restantMs = (parseInt(champMinutes.value, 10) || 0) * 60000;
-  affichageTemps.classList.remove('termine');
-  affichageTemps.textContent = formaterDuree(minuteur.restantMs);
-  boutonMarche.textContent = 'Démarrer';
-}
-
-function arreterMinuteur() {
-  minuteur.actif = false;
-  if (minuteur.intervalle) { clearInterval(minuteur.intervalle); minuteur.intervalle = null; }
-}
-
-/* Son + vibration à la fin du minuteur. */
+/* Son + vibration à la fin d'un minuteur. */
 function signalerFin() {
   if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 400]);
   try {
@@ -760,6 +1268,16 @@ function appliquerTheme(theme) {
   sauvegarder();
 }
 
+/* Unité d'affichage des températures (°C par défaut, °F possible). */
+function appliquerUniteTemp(unite) {
+  donnees.reglages.uniteTemp = unite === 'F' ? 'F' : 'C';
+  const select = document.getElementById('unite-temp');
+  if (select) select.value = donnees.reglages.uniteTemp;
+  const labelTemp = document.getElementById('label-temp');
+  if (labelTemp) labelTemp.textContent = 'Température du four (' + (uniteTemp() === 'F' ? '°F' : '°C') + ')';
+  sauvegarder();
+}
+
 function appliquerLuminosite(valeur) {
   const v = Math.min(100, Math.max(30, parseInt(valeur, 10) || 100));
   donnees.reglages.luminosite = v;
@@ -773,7 +1291,7 @@ function appliquerLuminosite(valeur) {
 }
 
 /* Export des données en fichier JSON (sauvegarde / migration). */
-function exporterDonnees() {
+function exporterDonnees(suffixe) {
   const exportation = {
     application: 'Omni-Cooking',
     version: VERSION_DONNEES,
@@ -783,7 +1301,8 @@ function exporterDonnees() {
     reglages: donnees.reglages
   };
   const blob = new Blob([JSON.stringify(exportation, null, 2)], { type: 'application/json' });
-  const a = el('a', { href: URL.createObjectURL(blob), download: 'omni-cooking-' + new Date().toISOString().slice(0, 10) + '.json' });
+  const date = new Date().toISOString().slice(0, 10);
+  const a = el('a', { href: URL.createObjectURL(blob), download: 'omni-cooking-' + (suffixe ? suffixe + '-' : '') + date + '.json' });
   document.body.append(a);
   a.click();
   a.remove();
@@ -798,11 +1317,13 @@ function importerDonnees(fichier) {
     try {
       const lu = JSON.parse(lecteur.result);
       if (!lu || !Array.isArray(lu.recettes)) throw new Error('format invalide');
-      if (!window.confirm('Remplacer toutes les recettes et la liste de courses actuelles par celles du fichier « ' + fichier.name + ' » ?')) return;
+      /* Sauvegarde automatique de l'état actuel avant tout remplacement. */
+      exporterDonnees('sauvegarde-avant-import');
+      if (!window.confirm('Remplacer toutes les recettes et la liste de courses actuelles par celles du fichier « ' + fichier.name + ' » ?\n(Une sauvegarde de l\'état actuel vient d\'être téléchargée.)')) return;
       donnees.recettes = lu.recettes.map(normaliserRecette);
       donnees.courses = (lu.courses || [])
         .filter((c) => c && c.nom)
-        .map((c) => ({ id: c.id || uid(), nom: String(c.nom), quantite: Number(c.quantite) || 0, unite: uniteBase(UNITES.includes(c.unite) ? c.unite : 'pièce'), coche: !!c.coche }));
+        .map((c) => ({ id: c.id || uid(), nom: String(c.nom), quantite: Number(c.quantite) || 0, unite: uniteBase(UNITES.includes(c.unite) ? c.unite : 'pièce'), coche: !!c.coche, recurrente: !!c.recurrente }));
       if (lu.reglages) donnees.reglages = Object.assign(donnees.reglages, lu.reglages);
       sauvegarder();
       appliquerTheme(donnees.reglages.theme);
@@ -822,12 +1343,51 @@ function importerDonnees(fichier) {
    ------------------------------------------------------------ */
 
 let toastMinuteur = null;
-function toast(message) {
+/* Toast, éventuellement avec un bouton d'action (ex. « Annuler »). */
+function toast(message, action) {
   const zone = document.getElementById('toast');
-  zone.textContent = message;
+  zone.textContent = '';
+  zone.append(message);
+  if (action && action.label) {
+    zone.append(el('button', {
+      class: 'toast-action', type: 'button',
+      onclick: () => { zone.classList.remove('visible'); action.action(); }
+    }, action.label));
+  }
   zone.classList.add('visible');
   if (toastMinuteur) clearTimeout(toastMinuteur);
-  toastMinuteur = setTimeout(() => zone.classList.remove('visible'), 2600);
+  toastMinuteur = setTimeout(() => zone.classList.remove('visible'), action ? 6000 : 2600);
+}
+
+/* ------------------------------------------------------------
+   9b. Installation de la PWA (bouton « Installer » quand le
+       navigateur le propose ; indice manuel pour iOS/Safari)
+   ------------------------------------------------------------ */
+
+let inviteInstallation = null;
+
+function configurerInstallation() {
+  const bouton = document.getElementById('bouton-installer');
+  const indice = document.getElementById('indice-installation');
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    inviteInstallation = e;
+    bouton.hidden = false;
+  });
+  bouton.addEventListener('click', async () => {
+    if (!inviteInstallation) return;
+    inviteInstallation.prompt();
+    const choix = await inviteInstallation.userChoice;
+    if (choix && choix.outcome === 'accepted') toast('✔ Application installée');
+    inviteInstallation = null;
+    bouton.hidden = true;
+  });
+  /* iOS/Safari ne déclenche pas beforeinstallprompt : expliquer la manip. */
+  const estIOS = /iPhone|iPad|iPod/.test(navigator.userAgent || '');
+  const estStandalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+  if (!estStandalone && (estIOS || !('BeforeInstallPromptEvent' in window))) {
+    indice.textContent = 'Pour installer : sur iPhone/iPad, touchez « Partager » puis « Sur l\'écran d\'accueil » ; sur ordinateur, utilisez l\'icône « Installer » de la barre d\'adresse du navigateur.';
+  }
 }
 
 /* ------------------------------------------------------------
@@ -864,7 +1424,10 @@ function surveillerMisesAJour() {
     });
   }).catch((e) => console.error('Omni-Cooking : service worker non enregistré', e));
   /* Quand la nouvelle version prend le contrôle, on recharge la page. */
-  navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    try { sessionStorage.setItem('omni-cooking-maj', '1'); } catch (e) { /* stockage indisponible */ }
+    window.location.reload();
+  });
 }
 
 /* ------------------------------------------------------------
@@ -874,6 +1437,15 @@ function surveillerMisesAJour() {
 function router() {
   const parties = (location.hash || '#/').replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
   const [vue, arg, sous] = parties;
+  /* Annonce du changement de vue aux lecteurs d'écran. */
+  const annonce = document.getElementById('annonce');
+  if (annonce) {
+    const titres = { accueil: 'Mes recettes', recette: 'Fiche de la recette', nouvelle: 'Formulaire de recette', formulaire: 'Formulaire de recette', courses: 'Liste de courses', reglages: 'Réglages', apropos: 'À propos' };
+    let texte = 'Vue : ' + (titres[vue || 'accueil'] || vue || 'accueil');
+    const r = arg ? donnees.recettes.find((x) => x.id === arg) : null;
+    if (r) texte += ' — ' + r.nom;
+    annonce.textContent = texte;
+  }
   switch (vue || 'accueil') {
     case 'recette':
       if (sous === 'modifier' && arg) { afficherVue('formulaire'); rendreFormulaire(arg); }
@@ -900,8 +1472,18 @@ function router() {
    12. Initialisation
    ------------------------------------------------------------ */
 
-function init() {
-  chargerDonnees();
+async function init() {
+  await chargerDonnees();
+
+  /* Toast de confirmation après une mise à jour appliquée (rechargement). */
+  try {
+    if (sessionStorage.getItem('omni-cooking-maj')) {
+      sessionStorage.removeItem('omni-cooking-maj');
+      setTimeout(() => toast('✔ Mise à jour appliquée'), 400);
+    }
+  } catch (e) { /* sessionStorage indisponible */ }
+
+  configurerInstallation();
 
   /* Réglages persistants. */
   appliquerTheme(donnees.reglages.theme);
@@ -910,15 +1492,32 @@ function init() {
     r.addEventListener('change', () => appliquerTheme(r.value));
   });
   document.getElementById('luminosite').addEventListener('input', (e) => appliquerLuminosite(e.target.value));
+  appliquerUniteTemp(donnees.reglages.uniteTemp);
+  document.getElementById('unite-temp').addEventListener('change', (e) => { appliquerUniteTemp(e.target.value); router(); });
 
   /* Recherche et filtres. */
   document.getElementById('recherche').addEventListener('input', (e) => { rechercheTexte = e.target.value; rendreAccueil(); });
   document.getElementById('filtre-temps').addEventListener('change', (e) => { filtreTemps = e.target.value; rendreAccueil(); });
+  document.getElementById('tri').addEventListener('change', (e) => {
+    donnees.reglages.tri = e.target.value;
+    sauvegarder();
+    rendreAccueil();
+  });
 
   /* Liste de courses. */
   document.getElementById('vider-cochees').addEventListener('click', () => {
-    donnees.courses = donnees.courses.filter((c) => !c.coche);
-    sauvegarder(); rendreCourses(); toast('Articles cochés retirés');
+    /* Les articles récurrents sont conservés. */
+    const avant = donnees.courses.length;
+    donnees.courses = donnees.courses.filter((c) => !c.coche || c.recurrente);
+    sauvegarder(); rendreCourses();
+    toast(avant - donnees.courses.length + ' article(s) coché(s) retiré(s) (récurrents conservés)');
+  });
+  document.getElementById('ajouter-article').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const champ = document.getElementById('nouvel-article');
+    ajouterArticleManuel(champ.value);
+    champ.value = '';
+    rendreCourses();
   });
   document.getElementById('vider-tout').addEventListener('click', () => {
     if (donnees.courses.length === 0 || window.confirm('Vider toute la liste de courses ?')) {
@@ -959,6 +1558,20 @@ function init() {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !document.getElementById('mode-cuisson').hidden && !document.fullscreenElement) fermerModeCuisson();
   });
+
+  /* Raccourcis clavier : « / » recherche, « n » nouvelle recette. */
+  document.addEventListener('keydown', (e) => {
+    const dansChamp = e.target && e.target.matches && e.target.matches('input, textarea, select, [contenteditable="true"]');
+    if (dansChamp || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === '/') {
+      e.preventDefault();
+      location.hash = '#/';
+      setTimeout(() => { const champ = document.getElementById('recherche'); if (champ) champ.focus(); }, 0);
+    } else if (e.key === 'n') {
+      e.preventDefault();
+      location.hash = '#/nouvelle';
+    }
+  });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && recetteEnCuisson) demanderVigilance();
   });
@@ -970,14 +1583,16 @@ function init() {
 
 /* Lancement uniquement dans un navigateur. */
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-  else init();
+  const lancer = () => { init().catch((e) => console.error('Omni-Cooking : initialisation', e)); };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', lancer);
+  else lancer();
 }
 
 /* Export des fonctions pures pour les tests (Node). */
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     UNITES, uniteBase, versBase, normaliserAffichage, arrondirQuantite,
-    formaterDenombrable, formaterQuantite, quantiteMiseAJour, normaliserTexte, normaliserRecette
+    formaterDenombrable, formaterQuantite, quantiteMiseAJour, normaliserTexte, normaliserRecette,
+    cVersF, fVersC, rayonDe, RAYONS
   };
 }
