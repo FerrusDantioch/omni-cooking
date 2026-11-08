@@ -7,6 +7,11 @@
 <meta name="description" content="Omni-Cooking : vos recettes de cuisine, quantités ajustées selon les parts, liste de courses et mode cuisson avec minuteur. Application 100 % hors ligne de l'Omni-Système, par Ferrus Dantioch.">
 <meta name="author" content="Ferrus Dantioch">
 <meta name="theme-color" content="#14111d">
+<!-- Métas d'installation PWA (Android/Chrome via manifest, iOS via ces métas) -->
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="OmniCooking">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -127,6 +132,12 @@
         <input type="range" id="luminosite" min="30" max="100" step="5" value="100">
         <output id="luminosite-valeur" for="luminosite">100 %</output>
       </div>
+    </fieldset>
+
+    <fieldset class="groupe">
+      <legend>Installation</legend>
+      <p class="discret" id="indice-installation">Installez Omni-Cooking sur cet appareil : l'application s'ouvrira alors comme une vraie application, même hors ligne.</p>
+      <button id="bouton-installer" class="bouton" type="button" hidden>Installer l'application</button>
     </fieldset>
 
     <fieldset class="groupe">

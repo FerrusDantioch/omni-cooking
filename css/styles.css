@@ -10,6 +10,7 @@
 /* ---------- Thèmes ---------- */
 /* Sombre / violet = thème de la charte (violet nuit), thème par défaut. */
 :root, [data-theme="nuit"] {
+  color-scheme:dark;
   --nuit:#14111d; --table:#1d1929; --trait:#332c47;
   --texte:#e9e4f2; --discret:#a59cbb; --omni:#a777ff; --halo:#d6c2ff;
   --fond:var(--nuit); --surface:var(--table); --bordure:var(--trait);
@@ -22,6 +23,7 @@
 }
 /* Sombre neutre, accent violet conservé. */
 [data-theme="sombre"] {
+  color-scheme:dark;
   --fond:#161616; --surface:#222222; --bordure:#3d3d3d;
   --texte-p:#ececec; --texte-s:#b3b3b3;
   --accent:#a777ff; --accent-texte:#140d24; --accent-fond:#2a1660;
@@ -30,6 +32,7 @@
 }
 /* Clair : violet assombri pour garantir le contraste (≥ 4,5:1). */
 [data-theme="clair"] {
+  color-scheme:light;
   --fond:#f6f4fb; --surface:#ffffff; --bordure:#ddd6ee;
   --texte-p:#241f33; --texte-s:#5d5670;
   --accent:#6a35d6; --accent-texte:#ffffff; --accent-fond:#efe9fb;

@@ -966,6 +966,37 @@ function toast(message, action) {
 }
 
 /* ------------------------------------------------------------
+   9b. Installation de la PWA (bouton « Installer » quand le
+       navigateur le propose ; indice manuel pour iOS/Safari)
+   ------------------------------------------------------------ */
+
+let inviteInstallation = null;
+
+function configurerInstallation() {
+  const bouton = document.getElementById('bouton-installer');
+  const indice = document.getElementById('indice-installation');
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    inviteInstallation = e;
+    bouton.hidden = false;
+  });
+  bouton.addEventListener('click', async () => {
+    if (!inviteInstallation) return;
+    inviteInstallation.prompt();
+    const choix = await inviteInstallation.userChoice;
+    if (choix && choix.outcome === 'accepted') toast('✔ Application installée');
+    inviteInstallation = null;
+    bouton.hidden = true;
+  });
+  /* iOS/Safari ne déclenche pas beforeinstallprompt : expliquer la manip. */
+  const estIOS = /iPhone|iPad|iPod/.test(navigator.userAgent || '');
+  const estStandalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+  if (!estStandalone && (estIOS || !('BeforeInstallPromptEvent' in window))) {
+    indice.textContent = 'Pour installer : sur iPhone/iPad, touchez « Partager » puis « Sur l\'écran d\'accueil » ; sur ordinateur, utilisez l\'icône « Installer » de la barre d\'adresse du navigateur.';
+  }
+}
+
+/* ------------------------------------------------------------
    10. Service worker : enregistrement et bouton de mise à jour
    ------------------------------------------------------------ */
 
@@ -999,7 +1030,10 @@ function surveillerMisesAJour() {
     });
   }).catch((e) => console.error('Omni-Cooking : service worker non enregistré', e));
   /* Quand la nouvelle version prend le contrôle, on recharge la page. */
-  navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    try { sessionStorage.setItem('omni-cooking-maj', '1'); } catch (e) { /* stockage indisponible */ }
+    window.location.reload();
+  });
 }
 
 /* ------------------------------------------------------------
@@ -1037,6 +1071,16 @@ function router() {
 
 function init() {
   chargerDonnees();
+
+  /* Toast de confirmation après une mise à jour appliquée (rechargement). */
+  try {
+    if (sessionStorage.getItem('omni-cooking-maj')) {
+      sessionStorage.removeItem('omni-cooking-maj');
+      setTimeout(() => toast('✔ Mise à jour appliquée'), 400);
+    }
+  } catch (e) { /* sessionStorage indisponible */ }
+
+  configurerInstallation();
 
   /* Réglages persistants. */
   appliquerTheme(donnees.reglages.theme);
