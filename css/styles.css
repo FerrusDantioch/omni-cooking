@@ -236,6 +236,11 @@ input:focus, select:focus, textarea:focus { border-color:var(--accent); }
 .indice { font-size:.9rem; color:var(--texte-s); }
 
 /* ---------- Liste de courses ---------- */
+.ajout-article { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:20px; }
+.ajout-article input { flex:1; min-width:min(100%, 220px); }
+.rayon { display:grid; gap:10px; margin-bottom:22px; }
+.rayon-titre { font-size:1rem; color:var(--accent); letter-spacing:.06em; text-transform:uppercase; }
+.bouton-etoile[aria-pressed="true"] { color:var(--accent); border-color:var(--accent); }
 .liste-courses { list-style:none; margin:0; padding:0; display:grid; gap:10px; }
 .liste-courses li {
   display:flex; align-items:center; gap:14px;

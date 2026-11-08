@@ -196,7 +196,7 @@ function chargerDonnees() {
       recettes: (lu.recettes || []).map(normaliserRecette),
       courses: (lu.courses || [])
         .filter((c) => c && c.nom)
-        .map((c) => ({ id: c.id || uid(), nom: String(c.nom), quantite: Number(c.quantite) || 0, unite: uniteBase(UNITES.includes(c.unite) ? c.unite : 'pièce'), coche: !!c.coche })),
+        .map((c) => ({ id: c.id || uid(), nom: String(c.nom), quantite: Number(c.quantite) || 0, unite: uniteBase(UNITES.includes(c.unite) ? c.unite : 'pièce'), coche: !!c.coche, recurrente: !!c.recurrente })),
       reglages: Object.assign({ theme: 'nuit', luminosite: 100, tri: 'modifie', uniteTemp: 'C' }, lu.reglages || {})
     };
   } catch (e) {
@@ -276,6 +276,23 @@ function cleCourse(nom, unite) {
   return normaliserTexte(nom) + '|' + uniteBase(unite);
 }
 
+/* Rayons de magasin : le premier motif trouvé dans le nom de l'article gagne. */
+const RAYONS = [
+  ['Fruits et légumes', /pomme|poire|banane|orange|citron|fraise|framboise|myrtille|raisin|pêche|abricot|prune|cerise|melon|pastèque|carotte|oignon|ail|échalote|tomate|salade|laitue|épinard|poireau|courgette|poivron|aubergine|concombre|champignon|avocat|haricot|petit pois|maïs|céleri|navet|radis|betterave|chou|fenouil|potiron|courge|patate|pomme de terre|asperge|artichaut|fruit|légume|herbe|persil|basilic|menthe|coriandre|ciboulette/i],
+  ['Boulangerie et céréales', /farine|pain|baguette|pâte|pâtes|riz|semoule|quinoa|avoine|céréale|levure|couscous|polenta|nouille|spaghetti|penne|macaroni|lasagne|tagliatelle|brioche|croissant|blé|sarrasin|millet/i],
+  ['Crèmerie et œufs', /lait|crème|beurre|fromage|yaourt|yogourt|œuf|oeuf|mascarpone|mozzarella|parmesan|gruyère|emmental|chèvre|chantilly/i],
+  ['Viandes et poissons', /poulet|bœuf|boeuf|porc|veau|agneau|mouton|jambon|lardon|saucisse|steak|haché|escalope|dinde|canard|thon|saumon|cabillaud|merlu|maquereau|sardine|anchois|crevette|moule|poisson|viande|magret|rillettes/i],
+  ['Épicerie salée', /huile|vinaigre|sel|poivre|moutarde|ketchup|mayonnaise|sauce|épice|curry|paprika|cannelle|thym|laurier|romarin|concentré|cube|conserve|lentille|pois chiche|olive|câpre|cornichon|soja|nuoc mam/i],
+  ['Épicerie sucrée', /sucre|miel|confiture|chocolat|vanille|cacao|pâte à tartiner|sirop|mélasse|cassonade|glace en poudre/i],
+  ['Boissons', /eau|jus|vin|bière|cidre|soda|café|thé|tisane|limonade|boisson/i],
+  ['Surgelés', /surgelé|sorbet/i],
+  ['Hygiène et entretien', /sopalin|papier toilette|essuie-tout|éponge|lessive|savon|shampoing|dentifrice|sac poubelle|aluminium|film étirable|papier cuisson|bicarbonate/i]
+];
+function rayonDe(nom) {
+  for (const [label, motif] of RAYONS) if (motif.test(nom)) return label;
+  return 'Autres';
+}
+
 /* Ajoute une quantité à la liste de courses (fusion si l'ingrédient existe déjà). */
 function ajouterAListe(nom, quantite, unite) {
   const baseU = uniteBase(unite);
@@ -288,9 +305,18 @@ function ajouterAListe(nom, quantite, unite) {
     existant.quantite = n.q;
     existant.unite = n.unite;
   } else {
-    donnees.courses.push({ id: uid(), nom: nom.trim(), quantite: qBase, unite: baseU, coche: false });
+    donnees.courses.push({ id: uid(), nom: nom.trim(), quantite: qBase, unite: baseU, coche: false, recurrente: false });
   }
   sauvegarder();
+}
+
+/* Ajoute un article manuel (sans quantité) à la liste de courses. */
+function ajouterArticleManuel(nom) {
+  nom = String(nom || '').trim();
+  if (!nom) return;
+  donnees.courses.push({ id: uid(), nom, quantite: 0, unite: 'pièce', coche: false, recurrente: false });
+  sauvegarder();
+  toast('« ' + nom + ' » ajouté à la liste');
 }
 
 /* Ajoute tous les ingrédients d'une recette (quantités ajustées aux parts affichées). */
@@ -307,13 +333,22 @@ function coursesAgregees() {
   const groupes = new Map();
   for (const item of donnees.courses) {
     const cle = cleCourse(item.nom, item.unite);
-    if (!groupes.has(cle)) groupes.set(cle, { nom: item.nom, unite: uniteBase(item.unite), quantite: 0, coche: true, ids: [] });
+    if (!groupes.has(cle)) groupes.set(cle, { nom: item.nom, unite: uniteBase(item.unite), quantite: 0, coche: true, recurrente: false, ids: [] });
     const g = groupes.get(cle);
     g.quantite = arrondirSelonUnite(g.quantite + versBase(item.quantite, item.unite), g.unite);
     g.coche = g.coche && item.coche;
+    g.recurrente = g.recurrente || !!item.recurrente;
     g.ids.push(item.id);
   }
-  return [...groupes.values()];
+  for (const g of groupes.values()) g.rayon = rayonDe(g.nom);
+  /* Tri par rayon (ordre du magasin), puis par nom. */
+  const ordre = RAYONS.map(([label]) => label);
+  ordre.push('Autres');
+  return [...groupes.values()].sort((a, b) => {
+    const ra = ordre.indexOf(a.rayon), rb = ordre.indexOf(b.rayon);
+    if (ra !== rb) return ra - rb;
+    return a.nom.localeCompare(b.nom, 'fr');
+  });
 }
 
 /* ------------------------------------------------------------
@@ -673,37 +708,65 @@ function rendreCourses() {
   conteneur.textContent = '';
   const groupes = coursesAgregees();
   if (groupes.length === 0) {
-    conteneur.append(el('p', { class: 'discret', text: 'La liste est vide. Ouvrez une recette et touchez « ＋ Courses » à côté d\'un ingrédient, ou « Tout ajouter ».' }));
+    conteneur.append(el('p', { class: 'discret', text: 'La liste est vide. Ouvrez une recette et touchez « ＋ Courses » à côté d\'un ingrédient, « Tout ajouter », ou ajoutez un article ci-dessus.' }));
     return;
   }
-  const liste = el('ul', { class: 'liste-courses' });
+  /* Regroupement par rayon de magasin. */
+  const parRayon = new Map();
   for (const g of groupes) {
-    const q = normaliserAffichage(g.quantite, g.unite);
-    const coche = el('input', {
-      type: 'checkbox', checked: g.coche ? 'true' : null,
-      'aria-label': 'Cocher ' + g.nom,
-      onchange: (e) => {
-        for (const id of g.ids) {
-          const item = donnees.courses.find((c) => c.id === id);
-          if (item) item.coche = e.target.checked;
+    if (!parRayon.has(g.rayon)) parRayon.set(g.rayon, []);
+    parRayon.get(g.rayon).push(g);
+  }
+  for (const [rayon, listeG] of parRayon) {
+    const liste = el('ul', { class: 'liste-courses', 'aria-label': rayon });
+    for (const g of listeG) {
+      const q = normaliserAffichage(g.quantite, g.unite);
+      const coche = el('input', {
+        type: 'checkbox', checked: g.coche ? 'true' : null,
+        'aria-label': 'Cocher ' + g.nom,
+        onchange: (e) => {
+          for (const id of g.ids) {
+            const item = donnees.courses.find((c) => c.id === id);
+            if (item) item.coche = e.target.checked;
+          }
+          sauvegarder();
+          rendreCourses();
         }
-        sauvegarder();
-        rendreCourses();
-      }
-    });
-    liste.append(el('li', { class: g.coche ? 'coche' : '' },
-      coche,
-      el('span', { class: 'article' }, el('span', { class: 'qte', text: formaterQuantite(q.q, q.unite) }), g.nom),
-      el('button', {
-        class: 'bouton-petit', type: 'button', 'aria-label': 'Retirer ' + g.nom + ' de la liste', title: 'Retirer',
-        onclick: () => {
-          donnees.courses = donnees.courses.filter((c) => !g.ids.includes(c.id));
-          sauvegarder(); rendreCourses(); toast(g.nom + ' retiré de la liste');
-        }
-      }, '✕')
+      });
+      liste.append(el('li', { class: g.coche ? 'coche' : '' },
+        coche,
+        el('span', { class: 'article' },
+          g.quantite > 0 ? el('span', { class: 'qte', text: formaterQuantite(q.q, q.unite) }) : null,
+          g.nom
+        ),
+        el('button', {
+          class: 'bouton-petit bouton-etoile', type: 'button',
+          'aria-pressed': g.recurrente ? 'true' : 'false',
+          'aria-label': (g.recurrente ? 'Retirer ' : 'Marquer ') + g.nom + (g.recurrente ? '' : ' comme article récurrent (toujours à acheter)'),
+          title: 'Article récurrent (toujours à acheter)',
+          onclick: () => {
+            for (const id of g.ids) {
+              const item = donnees.courses.find((c) => c.id === id);
+              if (item) item.recurrente = !g.recurrente;
+            }
+            sauvegarder(); rendreCourses();
+            toast(g.recurrente ? '« ' + g.nom + ' » n\'est plus récurrent' : '« ' + g.nom + ' » sera toujours proposé');
+          }
+        }, g.recurrente ? '★' : '☆'),
+        el('button', {
+          class: 'bouton-petit', type: 'button', 'aria-label': 'Retirer ' + g.nom + ' de la liste', title: 'Retirer',
+          onclick: () => {
+            donnees.courses = donnees.courses.filter((c) => !g.ids.includes(c.id));
+            sauvegarder(); rendreCourses(); toast(g.nom + ' retiré de la liste');
+          }
+        }, '✕')
+      ));
+    }
+    conteneur.append(el('section', { class: 'rayon', 'aria-labelledby': 'rayon-' + normaliserTexte(rayon) },
+      el('h2', { class: 'rayon-titre', id: 'rayon-' + normaliserTexte(rayon), text: rayon }),
+      liste
     ));
   }
-  conteneur.append(liste);
 }
 
 /* ------------------------------------------------------------
@@ -929,7 +992,7 @@ function importerDonnees(fichier) {
       donnees.recettes = lu.recettes.map(normaliserRecette);
       donnees.courses = (lu.courses || [])
         .filter((c) => c && c.nom)
-        .map((c) => ({ id: c.id || uid(), nom: String(c.nom), quantite: Number(c.quantite) || 0, unite: uniteBase(UNITES.includes(c.unite) ? c.unite : 'pièce'), coche: !!c.coche }));
+        .map((c) => ({ id: c.id || uid(), nom: String(c.nom), quantite: Number(c.quantite) || 0, unite: uniteBase(UNITES.includes(c.unite) ? c.unite : 'pièce'), coche: !!c.coche, recurrente: !!c.recurrente }));
       if (lu.reglages) donnees.reglages = Object.assign(donnees.reglages, lu.reglages);
       sauvegarder();
       appliquerTheme(donnees.reglages.theme);
@@ -1101,8 +1164,18 @@ function init() {
 
   /* Liste de courses. */
   document.getElementById('vider-cochees').addEventListener('click', () => {
-    donnees.courses = donnees.courses.filter((c) => !c.coche);
-    sauvegarder(); rendreCourses(); toast('Articles cochés retirés');
+    /* Les articles récurrents sont conservés. */
+    const avant = donnees.courses.length;
+    donnees.courses = donnees.courses.filter((c) => !c.coche || c.recurrente);
+    sauvegarder(); rendreCourses();
+    toast(avant - donnees.courses.length + ' article(s) coché(s) retiré(s) (récurrents conservés)');
+  });
+  document.getElementById('ajouter-article').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const champ = document.getElementById('nouvel-article');
+    ajouterArticleManuel(champ.value);
+    champ.value = '';
+    rendreCourses();
   });
   document.getElementById('vider-tout').addEventListener('click', () => {
     if (donnees.courses.length === 0 || window.confirm('Vider toute la liste de courses ?')) {
