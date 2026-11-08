@@ -1,0 +1,20 @@
+# CI d'Omni-Cooking : validation de la PWA à chaque pull request.
+# Aucune dépendance externe : Node.js est préinstallé sur les runners.
+name: Validation
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [vibe/omni-cooking-pwa-fe8c11]
+
+jobs:
+  validation:
+    name: Validation de la PWA
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupération du code
+        uses: actions/checkout@v4
+
+      - name: Vérifications (syntaxe JS, manifest, icônes, cache du service worker, quantités, licence)
+        run: node scripts/validate.mjs
