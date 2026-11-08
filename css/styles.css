@@ -1,0 +1,335 @@
+/* ============================================================
+   Omni-Cooking — feuille de style
+   Charte graphique de l'Omni-Système (identité « violet nuit ») :
+   --nuit #14111d (fond), --table #1d1929 (surfaces), --trait #332c47
+   (bordures), --texte #e9e4f2, --discret #a59cbb, --omni #a777ff
+   (violet du logo), --halo #d6c2ff (lueur).
+   Polices : Oxanium (titres), Literata (texte), JetBrains Mono.
+   ============================================================ */
+
+/* ---------- Thèmes ---------- */
+/* Sombre / violet = thème de la charte (violet nuit), thème par défaut. */
+:root, [data-theme="nuit"] {
+  --nuit:#14111d; --table:#1d1929; --trait:#332c47;
+  --texte:#e9e4f2; --discret:#a59cbb; --omni:#a777ff; --halo:#d6c2ff;
+  --fond:var(--nuit); --surface:var(--table); --bordure:var(--trait);
+  --texte-p:var(--texte); --texte-s:var(--discret);
+  --accent:var(--omni); --accent-texte:#140d24; --accent-fond:#2a1660;
+  --danger:#ff7a6b; --danger-fond:#3a1410;
+  --f-titre:"Oxanium","Trebuchet MS",system-ui,sans-serif;
+  --f-texte:"Literata",Georgia,"Times New Roman",serif;
+  --f-des:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+/* Sombre neutre, accent violet conservé. */
+[data-theme="sombre"] {
+  --fond:#161616; --surface:#222222; --bordure:#3d3d3d;
+  --texte-p:#ececec; --texte-s:#b3b3b3;
+  --accent:#a777ff; --accent-texte:#140d24; --accent-fond:#2a1660;
+  --danger:#ff7a6b; --danger-fond:#3a1410;
+  --nuit:#161616; --halo:#d6c2ff;
+}
+/* Clair : violet assombri pour garantir le contraste (≥ 4,5:1). */
+[data-theme="clair"] {
+  --fond:#f6f4fb; --surface:#ffffff; --bordure:#ddd6ee;
+  --texte-p:#241f33; --texte-s:#5d5670;
+  --accent:#6a35d6; --accent-texte:#ffffff; --accent-fond:#efe9fb;
+  --danger:#c2352a; --danger-fond:#fdecea;
+  --nuit:#f6f4fb; --halo:#4c24a8;
+}
+
+/* ---------- Base ---------- */
+* { box-sizing:border-box; }
+html { font-size:100%; }
+body {
+  margin:0;
+  background:var(--fond);
+  color:var(--texte-p);
+  font-family:var(--f-texte);
+  font-size:1.0625rem;
+  line-height:1.65;
+}
+a { color:var(--halo); text-underline-offset:3px; }
+[data-theme="clair"] a { color:var(--accent); }
+h1, h2, h3 { font-family:var(--f-titre); text-wrap:balance; line-height:1.15; margin:0; }
+h1 { font-size:1.9rem; font-weight:800; }
+h2 { font-size:1.3rem; font-weight:700; }
+h3 { font-size:1.05rem; font-weight:700; }
+p { margin:0.5em 0; }
+.discret { color:var(--texte-s); }
+/* Focus clavier bien visible (charte : filet halo). */
+a:focus-visible, button:focus-visible, input:focus-visible,
+select:focus-visible, textarea:focus-visible, summary:focus-visible, label.option:focus-within {
+  outline:3px solid var(--halo); outline-offset:3px; border-radius:6px;
+}
+
+/* Lien d'évitement (clavier) */
+.saut {
+  position:absolute; left:12px; top:-60px; z-index:60;
+  background:var(--accent); color:var(--accent-texte);
+  font-family:var(--f-titre); font-weight:700;
+  padding:10px 18px; border-radius:10px; text-decoration:none;
+  transition:top .15s ease;
+}
+.saut:focus-visible { top:12px; }
+
+/* ---------- En-tête ---------- */
+.entete {
+  position:sticky; top:env(safe-area-inset-top,0px); z-index:20;
+  background:color-mix(in srgb, var(--fond) 88%, transparent);
+  backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--bordure);
+  display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  padding:10px clamp(12px, 3vw, 28px);
+}
+.marque {
+  display:flex; align-items:center; gap:10px; text-decoration:none;
+  color:var(--texte-p); font-family:var(--f-titre); font-weight:800; letter-spacing:.04em;
+  font-size:1.15rem;
+}
+.marque .de { flex:none; filter:drop-shadow(0 0 6px var(--omni)); }
+.nav {
+  display:flex; gap:4px 18px; flex-wrap:wrap; align-items:center;
+  margin-left:auto; font-family:var(--f-titre); font-size:.95rem;
+}
+.nav a { color:var(--texte-s); text-decoration:none; padding:8px 2px; min-height:44px; display:inline-flex; align-items:center; }
+.nav a:hover { color:var(--texte-p); }
+.nav a[aria-current="page"] { color:var(--accent); box-shadow:inset 0 -3px 0 var(--accent); }
+.bouton-maj {
+  font:700 .85rem var(--f-titre); letter-spacing:.03em;
+  background:var(--accent); color:var(--accent-texte);
+  border:0; border-radius:999px; padding:9px 16px; cursor:pointer;
+  animation:pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse { 50% { filter:brightness(1.25); } }
+
+/* ---------- Corps ---------- */
+main { max-width:1080px; margin:0 auto; padding:clamp(16px,3vw,32px) clamp(12px,3vw,28px) 96px; }
+section[hidden] { display:none; }
+
+.barre-actions {
+  display:flex; align-items:center; justify-content:space-between;
+  gap:12px; flex-wrap:wrap; margin-bottom:18px;
+}
+.actions-ligne { display:flex; gap:10px; flex-wrap:wrap; }
+
+/* ---------- Boutons (grandes zones de clic, mains mouillées) ---------- */
+.bouton, .bouton-secondaire, .bouton-danger {
+  font:700 1rem var(--f-titre); letter-spacing:.03em;
+  border:0; border-radius:12px; padding:14px 22px; min-height:52px;
+  cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; gap:8px;
+}
+.bouton { background:var(--accent); color:var(--accent-texte); }
+.bouton:hover { filter:brightness(1.12); }
+.bouton-secondaire {
+  background:var(--surface); color:var(--texte-p);
+  border:1px solid var(--bordure);
+}
+.bouton-secondaire:hover { border-color:var(--accent); }
+.bouton-danger { background:var(--danger-fond); color:var(--danger); border:1px solid color-mix(in srgb, var(--danger) 45%, transparent); }
+.bouton-danger:hover { border-color:var(--danger); }
+.bouton:active, .bouton-secondaire:active, .bouton-danger:active { transform:scale(.97); }
+
+/* ---------- Recherche et filtres ---------- */
+.recherche {
+  display:grid; grid-template-columns:2fr 1fr; gap:14px;
+  margin-bottom:22px;
+}
+.champ { display:grid; gap:6px; align-content:start; }
+.champ label, legend { font-family:var(--f-titre); font-size:.85rem; letter-spacing:.06em; text-transform:uppercase; color:var(--texte-s); font-weight:700; }
+input[type="search"], input[type="text"], input[type="number"], select, textarea {
+  font:inherit; font-size:1.05rem; color:var(--texte-p);
+  background:var(--surface); border:1px solid var(--bordure); border-radius:12px;
+  padding:12px 14px; min-height:52px; width:100%;
+}
+textarea { min-height:140px; resize:vertical; line-height:1.5; }
+input:focus, select:focus, textarea:focus { border-color:var(--accent); }
+
+/* ---------- Cartes de recettes ---------- */
+.cartes {
+  display:grid; gap:16px;
+  grid-template-columns:repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+}
+.carte-recette {
+  background:var(--surface); border:1px solid var(--bordure);
+  border-top:4px solid var(--accent);
+  border-radius:6px 6px 14px 14px;
+  padding:20px; display:grid; gap:10px; align-content:start;
+}
+.carte-recette h2 a { color:var(--texte-p); text-decoration:none; }
+.carte-recette h2 a:hover { color:var(--accent); }
+.puces { display:flex; flex-wrap:wrap; gap:6px 14px; list-style:none; margin:0; padding:0; font-family:var(--f-des); font-size:.85rem; color:var(--texte-s); }
+.carte-recette .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:6px; }
+.carte-recette .actions .bouton-secondaire, .carte-recette .actions .bouton-danger { padding:10px 14px; min-height:46px; font-size:.9rem; }
+
+/* ---------- Fiche recette ---------- */
+.fiche { display:grid; gap:22px; }
+.fiche-entete { display:grid; gap:10px; }
+.puces-fiche { display:flex; flex-wrap:wrap; gap:8px; list-style:none; margin:0; padding:0; }
+.puce {
+  font:600 .85rem var(--f-titre); letter-spacing:.04em;
+  color:var(--texte-s); border:1px solid var(--bordure); border-radius:999px;
+  padding:7px 14px; background:var(--surface); white-space:nowrap;
+}
+.puce b { color:var(--texte-p); font-family:var(--f-des); font-weight:700; }
+.selecteur-parts {
+  display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  background:var(--surface); border:1px solid var(--bordure); border-radius:14px; padding:14px 18px;
+}
+.selecteur-parts .groupe-boutons { display:flex; align-items:center; gap:8px; }
+.selecteur-parts input { width:90px; text-align:center; font-family:var(--f-des); font-weight:700; }
+.bouton-rond {
+  width:52px; height:52px; border-radius:50%; border:1px solid var(--bordure);
+  background:var(--fond); color:var(--texte-p);
+  font:700 1.4rem var(--f-titre); cursor:pointer;
+}
+.bouton-rond:hover { border-color:var(--accent); color:var(--accent); }
+
+.groupe {
+  background:var(--surface); border:1px solid var(--bordure); border-radius:14px;
+  padding:18px 20px; display:grid; gap:12px;
+}
+.groupe legend { padding:0 8px; }
+.liste-ingredients { list-style:none; margin:0; padding:0; display:grid; gap:8px; }
+.liste-ingredients li {
+  display:flex; align-items:center; gap:12px;
+  background:var(--fond); border:1px solid var(--bordure); border-radius:12px;
+  padding:12px 14px; min-height:52px;
+}
+.liste-ingredients .qte { font-family:var(--f-des); font-weight:700; color:var(--accent); min-width:7.5em; text-align:right; font-size:1.05rem; }
+.liste-ingredients .nom { flex:1; font-size:1.05rem; }
+.liste-ingredients .ajouter-courses { flex:none; }
+.etapes { margin:0; padding-left:1.4em; display:grid; gap:10px; font-size:1.08rem; }
+.etapes li::marker { font-family:var(--f-des); color:var(--accent); font-weight:700; }
+
+/* ---------- Formulaire recette ---------- */
+.formulaire { display:grid; gap:20px; max-width:760px; }
+.ligne-champs { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap:14px; }
+.ingredients-form { display:grid; gap:10px; }
+.ligne-ingredient { display:grid; grid-template-columns:1fr 110px 130px 52px; gap:10px; align-items:center; }
+.ligne-ingredient input, .ligne-ingredient select { min-height:52px; }
+.bouton-icone {
+  width:52px; height:52px; border-radius:12px; border:1px solid var(--bordure);
+  background:var(--danger-fond); color:var(--danger); font-size:1.3rem; cursor:pointer;
+}
+.form-actions { display:flex; gap:12px; flex-wrap:wrap; }
+.indice { font-size:.9rem; color:var(--texte-s); }
+
+/* ---------- Liste de courses ---------- */
+.liste-courses { list-style:none; margin:0; padding:0; display:grid; gap:10px; }
+.liste-courses li {
+  display:flex; align-items:center; gap:14px;
+  background:var(--surface); border:1px solid var(--bordure); border-radius:12px;
+  padding:6px 16px 6px 10px; min-height:60px;
+}
+.liste-courses input[type="checkbox"] { width:30px; height:30px; accent-color:var(--accent); flex:none; cursor:pointer; }
+.liste-courses .article { flex:1; font-size:1.1rem; }
+.liste-courses .article .qte { font-family:var(--f-des); font-weight:700; color:var(--accent); margin-right:.5em; }
+.liste-courses li.coche .article { text-decoration:line-through; color:var(--texte-s); }
+.bouton-petit {
+  border:1px solid var(--bordure); background:var(--fond); color:var(--texte-s);
+  border-radius:10px; min-width:48px; min-height:48px; font-size:1.1rem; cursor:pointer;
+}
+.bouton-petit:hover { color:var(--danger); border-color:var(--danger); }
+
+/* ---------- Réglages ---------- */
+#vue-reglages { display:grid; gap:18px; max-width:760px; }
+#vue-reglages[hidden] { display:none; }
+.option {
+  display:flex; align-items:center; gap:12px;
+  background:var(--fond); border:1px solid var(--bordure); border-radius:12px;
+  padding:14px 16px; min-height:56px; cursor:pointer; font-size:1.05rem;
+}
+.option input { width:24px; height:24px; accent-color:var(--accent); }
+.ligne-luminosite { display:flex; align-items:center; gap:16px; }
+.ligne-luminosite input[type="range"] { flex:1; accent-color:var(--accent); min-height:44px; }
+.ligne-luminosite output { font-family:var(--f-des); font-weight:700; color:var(--accent); min-width:4.5em; text-align:right; }
+.fichier { cursor:pointer; }
+
+/* ---------- À propos ---------- */
+.carte.apropos {
+  background:var(--surface); border:1px solid var(--bordure);
+  border-top:4px solid var(--accent); border-radius:6px 6px 14px 14px;
+  padding:26px; display:flex; gap:24px; align-items:flex-start; max-width:820px;
+}
+.carte.apropos .de { flex:none; filter:drop-shadow(0 0 10px var(--omni)); }
+.signature { margin-top:18px; color:var(--texte-s); font-style:italic; }
+
+/* ---------- Mode cuisson (plein écran, gros caractères) ---------- */
+#mode-cuisson {
+  position:fixed; inset:0; z-index:40;
+  background:var(--fond); color:var(--texte-p);
+  overflow-y:auto; padding:clamp(16px, 4vw, 48px);
+}
+#mode-cuisson[hidden] { display:none; }
+.cuisson {
+  max-width:900px; margin:0 auto; display:grid; gap:clamp(18px, 4vh, 36px);
+}
+.cuisson .entete-cuisson { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; }
+.cuisson h2 { font-size:clamp(1.8rem, 5vw, 3rem); font-weight:800; }
+.cuisson .bouton-quitter { flex:none; }
+.cuisson-visuel {
+  display:flex; gap:clamp(16px, 4vw, 40px); flex-wrap:wrap; align-items:center; justify-content:center;
+  background:var(--surface); border:1px solid var(--bordure); border-radius:18px;
+  padding:clamp(16px, 3vw, 30px); text-align:center;
+}
+.thermo { font-family:var(--f-titre); font-weight:800; font-size:clamp(2.6rem, 9vw, 5rem); color:var(--accent); line-height:1; }
+.thermo small { display:block; font-family:var(--f-texte); font-weight:400; font-size:clamp(1rem, 2.6vw, 1.4rem); color:var(--texte-s); margin-top:8px; }
+.minuteur { display:grid; gap:10px; justify-items:center; }
+.minuteur .temps {
+  font-family:var(--f-des); font-weight:700;
+  font-size:clamp(3.4rem, 14vw, 7.5rem); line-height:1; font-variant-numeric:tabular-nums;
+}
+.minuteur .temps.termine { color:var(--danger); animation:flash 1s step-start infinite; }
+@keyframes flash { 50% { opacity:.35; } }
+.minuteur .controles { display:flex; gap:12px; flex-wrap:wrap; justify-content:center; }
+.minuteur .controles .bouton, .minuteur .controles .bouton-secondaire { min-height:60px; padding:16px 26px; font-size:1.1rem; }
+.minuteur .reglage-temps { display:flex; align-items:center; gap:10px; font-size:1.05rem; color:var(--texte-s); }
+.minuteur .reglage-temps input { width:90px; text-align:center; font-family:var(--f-des); font-weight:700; min-height:48px; }
+.etapes-cuisson { list-style:none; margin:0; padding:0; display:grid; gap:14px; counter-reset:etape; }
+.etapes-cuisson li {
+  counter-increment:etape; display:flex; gap:16px; align-items:baseline;
+  background:var(--surface); border:1px solid var(--bordure); border-radius:14px;
+  padding:18px 20px; font-size:clamp(1.35rem, 3.6vw, 2.1rem); line-height:1.35;
+  cursor:pointer; user-select:none;
+}
+.etapes-cuisson li::before {
+  content:counter(etape); flex:none;
+  font:700 clamp(1.2rem, 3vw, 1.8rem) var(--f-des); color:var(--accent);
+  width:1.6em; height:1.6em; display:inline-flex; align-items:center; justify-content:center;
+  border:2px solid var(--accent); border-radius:50%;
+}
+.etapes-cuisson li.faite { opacity:.45; text-decoration:line-through; }
+.etapes-cuisson li.faite::before { background:var(--accent); color:var(--accent-texte); }
+
+/* ---------- Voile de luminosité + toast ---------- */
+#voile {
+  position:fixed; inset:0; z-index:90; background:#000;
+  opacity:0; pointer-events:none;
+}
+#toast {
+  position:fixed; left:50%; bottom:26px; transform:translateX(-50%) translateY(80px);
+  z-index:95; background:var(--accent); color:var(--accent-texte);
+  font:700 .95rem var(--f-titre); border-radius:12px; padding:14px 22px;
+  opacity:0; transition:opacity .2s ease, transform .2s ease;
+  max-width:min(90vw, 480px); text-align:center; pointer-events:none;
+}
+#toast.visible { opacity:1; transform:translateX(-50%) translateY(0); }
+
+/* ---------- Responsive : d'abord tablette, puis mobile et grand écran ---------- */
+@media (max-width:640px) {
+  html { font-size:94%; }
+  .recherche { grid-template-columns:1fr; }
+  .ligne-ingredient { grid-template-columns:1fr 96px; }
+  .ligne-ingredient .unite { grid-column:1; }
+  .ligne-ingredient .bouton-icone { grid-column:2; grid-row:2; width:100%; }
+  .entete { gap:8px; }
+  .nav { gap:2px 12px; font-size:.88rem; width:100%; margin-left:0; }
+  .carte.apropos { flex-direction:column; }
+}
+@media (min-width:1200px) {
+  main { max-width:1180px; }
+  .cartes { grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation:none !important; transition:none !important; }
+}
