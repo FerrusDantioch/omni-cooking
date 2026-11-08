@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Icône Omni-Cooking : d20 violet de l'Omni-Système sur fond violet nuit -->
+  <rect width="64" height="64" rx="12" fill="#14111d"/>
+  <circle cx="32" cy="32" r="27.5" fill="none" stroke="#d6c2ff" stroke-width="1.6" opacity="0.55"/>
+  <circle cx="32" cy="32" r="29.5" fill="none" stroke="#a777ff" stroke-width="2.5" opacity="0.28"/>
+  <polygon points="32,6.4 54.2,19.2 54.2,44.8 32,57.6 9.8,44.8 9.8,19.2"
+           fill="#2a1660" stroke="#a777ff" stroke-width="2.6" stroke-linejoin="round"/>
+  <polygon points="32,17.6 42.6,36.8 21.4,36.8"
+           fill="none" stroke="#a777ff" stroke-width="2.2" stroke-linejoin="round"/>
+  <line x1="32" y1="17.6" x2="54.2" y2="19.2" stroke="#a777ff" stroke-width="1.8"/>
+  <line x1="32" y1="17.6" x2="9.8" y2="19.2" stroke="#a777ff" stroke-width="1.8"/>
+  <line x1="42.6" y1="36.8" x2="54.2" y2="44.8" stroke="#a777ff" stroke-width="1.8"/>
+  <line x1="42.6" y1="36.8" x2="32" y2="57.6" stroke="#a777ff" stroke-width="1.8"/>
+  <line x1="21.4" y1="36.8" x2="32" y2="57.6" stroke="#a777ff" stroke-width="1.8"/>
+  <line x1="21.4" y1="36.8" x2="9.8" y2="44.8" stroke="#a777ff" stroke-width="1.8"/>
+</svg>

@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="fr" data-theme="nuit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Omni-Cooking</title>
+<meta name="description" content="Omni-Cooking : vos recettes de cuisine, quantités ajustées selon les parts, liste de courses et mode cuisson avec minuteur. Application 100 % hors ligne de l'Omni-Système, par Ferrus Dantioch.">
+<meta name="author" content="Ferrus Dantioch">
+<meta name="theme-color" content="#14111d">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<!-- Polices de la charte Omni-Système (repli sur polices système hors ligne) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oxanium:wght@500;700;800&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;1,7..72,400&family=JetBrains+Mono:wght@500;700&display=swap">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<!-- Lien d'évitement pour la navigation au clavier -->
+<a class="saut" href="#contenu">Aller au contenu</a>
+
+<!-- En-tête : marque + navigation (style de la charte Omni-Système) -->
+<header class="entete">
+  <a class="marque" href="#/" aria-label="Omni-Cooking — accueil">
+    <svg class="de" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true" focusable="false">
+      <circle cx="32" cy="32" r="28" fill="none" stroke="#d6c2ff" stroke-width="2" opacity="0.55"/>
+      <polygon points="32,8 53.7,20 53.7,44 32,56 10.3,44 10.3,20" fill="#2a1660" stroke="#a777ff" stroke-width="2.6" stroke-linejoin="round"/>
+      <polygon points="32,18.8 42.4,37.2 21.6,37.2" fill="none" stroke="#a777ff" stroke-width="2.2" stroke-linejoin="round"/>
+      <line x1="32" y1="18.8" x2="53.7" y2="20" stroke="#a777ff" stroke-width="1.7"/>
+      <line x1="32" y1="18.8" x2="10.3" y2="20" stroke="#a777ff" stroke-width="1.7"/>
+      <line x1="42.4" y1="37.2" x2="53.7" y2="44" stroke="#a777ff" stroke-width="1.7"/>
+      <line x1="42.4" y1="37.2" x2="32" y2="56" stroke="#a777ff" stroke-width="1.7"/>
+      <line x1="21.6" y1="37.2" x2="32" y2="56" stroke="#a777ff" stroke-width="1.7"/>
+      <line x1="21.6" y1="37.2" x2="10.3" y2="44" stroke="#a777ff" stroke-width="1.7"/>
+    </svg>
+    <span>Omni-Cooking</span>
+  </a>
+  <nav class="nav" aria-label="Navigation principale">
+    <a href="#/">Recettes</a>
+    <a href="#/courses">Courses</a>
+    <a href="#/reglages">Réglages</a>
+    <a href="#/apropos">À propos</a>
+    <!-- Bouton de mise à jour : visible dans tous les onglets uniquement
+         quand une mise à jour est disponible (décidé par js/app.js) -->
+    <button id="bouton-maj" class="bouton-maj" type="button" hidden>Mise à jour disponible</button>
+  </nav>
+</header>
+
+<main id="contenu">
+
+  <!-- ==================== Accueil : recherche + liste des recettes ==================== -->
+  <section id="vue-accueil" aria-labelledby="titre-accueil">
+    <div class="barre-actions">
+      <h1 id="titre-accueil">Mes recettes</h1>
+      <a class="bouton" href="#/nouvelle">+ Nouvelle recette</a>
+    </div>
+
+    <div class="recherche">
+      <div class="champ">
+        <label for="recherche">Rechercher par nom ou ingrédient</label>
+        <input type="search" id="recherche" placeholder="Ex. : tarte, poulet, farine…" autocomplete="off">
+      </div>
+      <div class="champ">
+        <label for="filtre-temps">Temps total</label>
+        <select id="filtre-temps">
+          <option value="tous">Tous les temps</option>
+          <option value="30">30 min max</option>
+          <option value="60">1 h max</option>
+          <option value="120">2 h max</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="liste-recettes" class="cartes"></div>
+    <p id="aucune-recette" class="discret" hidden>Aucune recette ne correspond. <a href="#/nouvelle">Créez votre première recette</a>.</p>
+  </section>
+
+  <!-- ==================== Fiche d'une recette (rendu dynamique) ==================== -->
+  <section id="vue-fiche" aria-labelledby="titre-fiche" hidden>
+    <div id="fiche-contenu"></div>
+  </section>
+
+  <!-- ==================== Formulaire création / modification ==================== -->
+  <section id="vue-formulaire" aria-labelledby="titre-formulaire" hidden>
+    <h1 id="titre-formulaire">Nouvelle recette</h1>
+    <div id="form-contenu"></div>
+  </section>
+
+  <!-- ==================== Liste de courses ==================== -->
+  <section id="vue-courses" aria-labelledby="titre-courses" hidden>
+    <div class="barre-actions">
+      <h1 id="titre-courses">Liste de courses</h1>
+      <div class="actions-ligne">
+        <button id="copier-courses" class="bouton-secondaire" type="button">Copier</button>
+        <button id="vider-cochees" class="bouton-secondaire" type="button">Retirer les cochés</button>
+        <button id="vider-tout" class="bouton-danger" type="button">Tout vider</button>
+      </div>
+    </div>
+    <div id="courses-contenu"></div>
+  </section>
+
+  <!-- ==================== Réglages ==================== -->
+  <section id="vue-reglages" aria-labelledby="titre-reglages" hidden>
+    <h1 id="titre-reglages">Réglages</h1>
+
+    <fieldset class="groupe">
+      <legend>Thème</legend>
+      <label class="option"><input type="radio" name="theme" value="nuit"> Sombre / violet (violet nuit)</label>
+      <label class="option"><input type="radio" name="theme" value="sombre"> Sombre</label>
+      <label class="option"><input type="radio" name="theme" value="clair"> Clair</label>
+    </fieldset>
+
+    <fieldset class="groupe">
+      <legend><label for="luminosite">Luminosité de l'écran (utile le soir en cuisine)</label></legend>
+      <div class="ligne-luminosite">
+        <input type="range" id="luminosite" min="30" max="100" step="5" value="100">
+        <output id="luminosite-valeur" for="luminosite">100 %</output>
+      </div>
+    </fieldset>
+
+    <fieldset class="groupe">
+      <legend>Mise à jour</legend>
+      <p id="statut-maj" class="discret">L'application vérifie les mises à jour à chaque ouverture.</p>
+      <button id="bouton-maj-reglages" class="bouton" type="button" hidden>Mettre à jour maintenant</button>
+    </fieldset>
+
+    <fieldset class="groupe">
+      <legend>Données (sauvegarde et migration entre appareils)</legend>
+      <p class="discret">Vos recettes et votre liste de courses sont stockées uniquement sur cet appareil (stockage local). Exportez-les en JSON pour les sauvegarder ou les transférer sur un autre appareil.</p>
+      <div class="actions-ligne">
+        <button id="exporter" class="bouton" type="button">Exporter en JSON</button>
+        <label class="bouton-secondaire fichier">
+          Importer un JSON
+          <input type="file" id="importer" accept="application/json,.json" hidden>
+        </label>
+      </div>
+    </fieldset>
+  </section>
+
+  <!-- ==================== À propos ==================== -->
+  <section id="vue-apropos" aria-labelledby="titre-apropos" hidden>
+    <h1 id="titre-apropos">À propos d'Omni-Cooking</h1>
+
+    <div class="carte apropos">
+      <svg class="de" viewBox="0 0 64 64" width="72" height="72" aria-hidden="true" focusable="false">
+        <circle cx="32" cy="32" r="28" fill="none" stroke="#d6c2ff" stroke-width="2" opacity="0.55"/>
+        <polygon points="32,8 53.7,20 53.7,44 32,56 10.3,44 10.3,20" fill="#2a1660" stroke="#a777ff" stroke-width="2.6" stroke-linejoin="round"/>
+        <polygon points="32,18.8 42.4,37.2 21.6,37.2" fill="none" stroke="#a777ff" stroke-width="2.2" stroke-linejoin="round"/>
+        <line x1="32" y1="18.8" x2="53.7" y2="20" stroke="#a777ff" stroke-width="1.7"/>
+        <line x1="32" y1="18.8" x2="10.3" y2="20" stroke="#a777ff" stroke-width="1.7"/>
+        <line x1="42.4" y1="37.2" x2="53.7" y2="44" stroke="#a777ff" stroke-width="1.7"/>
+        <line x1="42.4" y1="37.2" x2="32" y2="56" stroke="#a777ff" stroke-width="1.7"/>
+        <line x1="21.6" y1="37.2" x2="32" y2="56" stroke="#a777ff" stroke-width="1.7"/>
+        <line x1="21.6" y1="37.2" x2="10.3" y2="44" stroke="#a777ff" stroke-width="1.7"/>
+      </svg>
+      <div>
+        <p><strong>Omni-Cooking</strong> est une application de l'écosystème <strong>Omni-Système</strong>, développée par <strong>Ferrus Dantioch</strong> avec l'aide de l'IA.</p>
+        <p>Elle fonctionne <strong>100 % hors ligne</strong>, sans compte ni serveur : vos données restent sur votre appareil. Vous pouvez les exporter et les importer en JSON depuis les réglages.</p>
+        <p><strong>Licence Omni-Système :</strong> le code d'Omni-Cooking est distribué sous licence <a href="https://creativecommons.org/licenses/by-nc-nd/4.0/deed.fr">Creative Commons BY-NC-ND 4.0</a> (© 2026 Ferrus Dantioch) — partage autorisé en citant l'auteur, usage commercial, modification et œuvres dérivées interdits. Le texte officiel complet figure dans le fichier <a href="LICENSE">LICENSE</a> du projet.</p>
+        <p class="signature">Omni-Cooking — Ferrus Dantioch, avec l'aide de l'IA.</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ==================== Mode cuisson plein écran (rendu dynamique) ==================== -->
+<div id="mode-cuisson" role="dialog" aria-modal="true" aria-labelledby="cuisson-titre" hidden>
+  <div id="cuisson-contenu"></div>
+</div>
+
+<!-- Voile d'assombrissement réglable (luminosité) -->
+<div id="voile" aria-hidden="true"></div>
+
+<!-- Messages transitoires -->
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="js/app.js"></script>
+</body>
+</html>
