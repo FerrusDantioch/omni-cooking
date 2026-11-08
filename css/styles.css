@@ -332,6 +332,11 @@ input:focus, select:focus, textarea:focus { border-color:var(--accent); }
   max-width:min(90vw, 480px); text-align:center; pointer-events:none;
 }
 #toast.visible { opacity:1; transform:translateX(-50%) translateY(0); }
+.toast-action {
+  font:inherit; font-weight:700; margin-left:14px; cursor:pointer;
+  background:rgba(0,0,0,.28); color:inherit; border:0; border-radius:8px; padding:7px 14px;
+}
+.toast-action:hover { background:rgba(0,0,0,.45); }
 
 /* ---------- Responsive : d'abord tablette, puis mobile et grand écran ---------- */
 @media (max-width:640px) {

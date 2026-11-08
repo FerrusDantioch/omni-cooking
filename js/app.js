@@ -153,6 +153,10 @@ function sauvegarder() {
     localStorage.setItem(CLE_STOCKAGE, JSON.stringify(donnees));
   } catch (e) {
     console.error('Omni-Cooking : sauvegarde impossible', e);
+    /* Quota dépassé ou stockage indisponible : prévenir l'utilisateur. */
+    if (typeof document !== 'undefined') {
+      toast('⚠ Stockage plein : exportez vos données en JSON depuis les Réglages pour ne rien perdre.');
+    }
   }
 }
 
@@ -412,14 +416,32 @@ function dupliquerRecette(id) {
   location.hash = '#/recette/' + copie.id;
 }
 
+/* Suppression avec annulation possible pendant 6 secondes. */
+let derniereSuppression = null; // { recette, index, timer }
+
 function supprimerRecette(id) {
-  const r = donnees.recettes.find((x) => x.id === id);
-  if (!r) return;
-  if (!window.confirm('Supprimer définitivement la recette « ' + r.nom + ' » ?')) return;
-  donnees.recettes = donnees.recettes.filter((x) => x.id !== id);
+  const index = donnees.recettes.findIndex((x) => x.id === id);
+  if (index === -1) return;
+  const r = donnees.recettes[index];
+  donnees.recettes.splice(index, 1);
   sauvegarder();
-  toast('Recette « ' + r.nom + ' » supprimée');
-  location.hash = '#/';
+  if (derniereSuppression) clearTimeout(derniereSuppression.timer);
+  derniereSuppression = { recette: r, index, timer: null };
+  toast('Recette « ' + r.nom + ' » supprimée', { label: 'Annuler', action: annulerSuppression });
+  derniereSuppression.timer = setTimeout(() => { derniereSuppression = null; }, 6000);
+  if (location.hash.indexOf('#/recette/' + id) === 0) location.hash = '#/';
+  else router();
+}
+
+function annulerSuppression() {
+  if (!derniereSuppression) return;
+  clearTimeout(derniereSuppression.timer);
+  const { recette, index } = derniereSuppression;
+  donnees.recettes.splice(Math.min(index, donnees.recettes.length), 0, recette);
+  derniereSuppression = null;
+  sauvegarder();
+  toast('Suppression annulée : « ' + recette.nom + ' » restaurée');
+  router();
 }
 
 /* ---------- Fiche d'une recette ---------- */
@@ -875,7 +897,7 @@ function appliquerLuminosite(valeur) {
 }
 
 /* Export des données en fichier JSON (sauvegarde / migration). */
-function exporterDonnees() {
+function exporterDonnees(suffixe) {
   const exportation = {
     application: 'Omni-Cooking',
     version: VERSION_DONNEES,
@@ -885,7 +907,8 @@ function exporterDonnees() {
     reglages: donnees.reglages
   };
   const blob = new Blob([JSON.stringify(exportation, null, 2)], { type: 'application/json' });
-  const a = el('a', { href: URL.createObjectURL(blob), download: 'omni-cooking-' + new Date().toISOString().slice(0, 10) + '.json' });
+  const date = new Date().toISOString().slice(0, 10);
+  const a = el('a', { href: URL.createObjectURL(blob), download: 'omni-cooking-' + (suffixe ? suffixe + '-' : '') + date + '.json' });
   document.body.append(a);
   a.click();
   a.remove();
@@ -900,7 +923,9 @@ function importerDonnees(fichier) {
     try {
       const lu = JSON.parse(lecteur.result);
       if (!lu || !Array.isArray(lu.recettes)) throw new Error('format invalide');
-      if (!window.confirm('Remplacer toutes les recettes et la liste de courses actuelles par celles du fichier « ' + fichier.name + ' » ?')) return;
+      /* Sauvegarde automatique de l'état actuel avant tout remplacement. */
+      exporterDonnees('sauvegarde-avant-import');
+      if (!window.confirm('Remplacer toutes les recettes et la liste de courses actuelles par celles du fichier « ' + fichier.name + ' » ?\n(Une sauvegarde de l\'état actuel vient d\'être téléchargée.)')) return;
       donnees.recettes = lu.recettes.map(normaliserRecette);
       donnees.courses = (lu.courses || [])
         .filter((c) => c && c.nom)
@@ -924,12 +949,20 @@ function importerDonnees(fichier) {
    ------------------------------------------------------------ */
 
 let toastMinuteur = null;
-function toast(message) {
+/* Toast, éventuellement avec un bouton d'action (ex. « Annuler »). */
+function toast(message, action) {
   const zone = document.getElementById('toast');
-  zone.textContent = message;
+  zone.textContent = '';
+  zone.append(message);
+  if (action && action.label) {
+    zone.append(el('button', {
+      class: 'toast-action', type: 'button',
+      onclick: () => { zone.classList.remove('visible'); action.action(); }
+    }, action.label));
+  }
   zone.classList.add('visible');
   if (toastMinuteur) clearTimeout(toastMinuteur);
-  toastMinuteur = setTimeout(() => zone.classList.remove('visible'), 2600);
+  toastMinuteur = setTimeout(() => zone.classList.remove('visible'), action ? 6000 : 2600);
 }
 
 /* ------------------------------------------------------------
